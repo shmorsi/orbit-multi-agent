@@ -6,8 +6,6 @@ Orbit: Multi-Agent Mission Control runs a local planner, a worker, and a critic 
 The worker calls tools. The critic sends a bad claim back. A gate refuses anything the cited tool result does not contain.
 Mission Control replays the JSONL trace from the engine, including a task you start on your own machine. A scripted-harness trace is labeled scripted harness.
 
-CV line: Built Orbit, a local planner, worker, and critic that answers checkable questions over a bundled makerspace corpus, refuses a claim the cited tool result does not contain, and replays the engine trace in Mission Control.
-
 ## Try it yourself
 
 Python 3.11 or newer. The demo target is an 8 GB machine with the 0.5B model. The 1.5B model is optional and tight on that machine. QLoRA and bitsandbytes are CUDA-only. `make setup` does not install them, and the demo never imports them. A saved adapter, if you have one, is merged in half precision on MPS or CUDA and in full precision on CPU.
