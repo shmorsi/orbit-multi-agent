@@ -1,0 +1,6 @@
+{
+  "status": "pending",
+  "kind": "comparison",
+  "metrics": null,
+  "reason": "results/single_base.json is not a measured model eval"
+}

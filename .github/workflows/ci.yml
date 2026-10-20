@@ -1,0 +1,27 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Leakage check
+        run: python finetune/leakage.py
+      - name: Doctor
+        run: python -m orbit_agents.doctor
+      - name: Tests
+        env:
+          REQUIRE_EVAL_TAG: "1"
+        run: python -m pytest

@@ -1,0 +1,11 @@
+# Local demo on macOS arm64 (Apple Silicon), Linux, and Windows CPU.
+# bitsandbytes is absent on purpose. QLoRA is CUDA-only and lives in
+# finetune/requirements-colab.txt. Do not install a +cpu torch wheel here:
+# a default wheel is what exposes MPS on an M1.
+# Python 3.11 or newer.
+torch==2.11.0
+transformers==5.20.2
+tokenizers==0.23.3
+huggingface-hub==1.33.0
+peft==0.21.2
+accelerate==1.15.0

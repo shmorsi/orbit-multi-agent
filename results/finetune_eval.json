@@ -1,0 +1,6 @@
+{
+  "status": "pending",
+  "kind": "finetune_eval",
+  "metrics": null,
+  "note": "QLoRA has not been run. The Colab notebook trains the adapter and the frozen test is scored once, separately."
+}

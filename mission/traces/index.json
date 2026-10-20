@@ -1,0 +1,20 @@
+[
+  {
+    "file": "quotient.jsonl",
+    "task_id": "dev-012",
+    "status": "answer",
+    "question": "For machine printer-a, what is the integer quotient of total minutes divided by the job count?"
+  },
+  {
+    "file": "abort.jsonl",
+    "task_id": "dev-015",
+    "status": "refuse",
+    "question": "How many jobs did machine printer-z run?"
+  },
+  {
+    "file": "revise.jsonl",
+    "task_id": "dev-001",
+    "status": "answer",
+    "question": "How many jobs in the jobs table used machine printer-a?"
+  }
+]

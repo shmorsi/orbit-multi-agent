@@ -1,0 +1,45 @@
+[project]
+name = "orbit-agents"
+version = "0.1.0"
+description = "Orbit: Multi-Agent Mission Control. A local planner, worker, and critic over a bundled makerspace corpus, with a frozen eval and an optional LoRA track."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Sherif Morsi", email = "shmorsi@outlook.com" }]
+dependencies = ["jsonschema>=4.21"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+infer = [
+  "torch==2.11.0",
+  "transformers==5.20.2",
+  "tokenizers==0.23.3",
+  "huggingface-hub==1.33.0",
+  "peft==0.21.2",
+  "accelerate==1.15.0",
+]
+finetune = [
+  "transformers==5.20.2",
+  "tokenizers==0.23.3",
+  "huggingface-hub==1.33.0",
+  "accelerate==1.15.0",
+  "peft==0.21.2",
+  "bitsandbytes==0.50.2",
+  "trl==1.16.0",
+  "matplotlib==3.10.0",
+]
+
+[project.scripts]
+orbit = "orbit_agents.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src", "finetune"]

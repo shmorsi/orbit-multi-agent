@@ -1,0 +1,22 @@
+{
+  "n_agents": 3,
+  "n_tools": 6,
+  "n_tasks": 36,
+  "n_dev": 24,
+  "n_train_tasks": 16,
+  "n_tune_tasks": 8,
+  "n_test": 12,
+  "n_traps": 6,
+  "max_turns": 8,
+  "max_critic_retries": 2,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": 0,
+  "qwen_generation": 2.5,
+  "small_parameter_billions": 0.5,
+  "medium_parameter_billions": 1.5,
+  "colab_gpu_t": 4,
+  "python_min": 3.11,
+  "demo_port": 8741,
+  "m1_ram_gb": 8,
+  "replay_clock_step_seconds": 4
+}

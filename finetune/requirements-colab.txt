@@ -1,0 +1,14 @@
+# Pins for a current free Colab T4 (googlecolab/backend-info pip-freeze, October 2026).
+# transformers, tokenizers, huggingface-hub, accelerate, peft, and matplotlib match that runtime.
+# bitsandbytes and trl are not preinstalled. These releases accept the same stack:
+#   bitsandbytes 0.50.2 requires torch>=2.4,<3 and does not cap transformers
+#   trl 1.16.0 requires transformers>=4.56.2 and accelerate>=1.10.1
+# Do not add torch. Reinstalling it replaces Colab's CUDA build.
+transformers==5.20.2
+tokenizers==0.23.3
+huggingface-hub==1.33.0
+accelerate==1.15.0
+peft==0.21.2
+bitsandbytes==0.50.2
+trl==1.16.0
+matplotlib==3.10.0

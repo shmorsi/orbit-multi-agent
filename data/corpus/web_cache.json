@@ -1,0 +1,14 @@
+{
+  "pages": [
+    {
+      "query": "what does gcode M112 mean",
+      "title": "G-code M112",
+      "snippet": "M112 is the emergency stop command."
+    },
+    {
+      "query": "what does gcode G28 mean",
+      "title": "G-code G28",
+      "snippet": "G28 homes all axes."
+    }
+  ]
+}

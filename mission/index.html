@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>Orbit: Multi-Agent Mission Control</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">Orbit <span>Multi-Agent Mission Control</span></div>
+    <div class="meters">
+      <span>Steps <b id="steps">00</b></span>
+      <span>Retries <b id="retries">00</b></span>
+      <span>Tools <b id="tools">00</b></span>
+    </div>
+    <div id="harness" class="harness-chip" hidden>Scripted harness</div>
+    <div id="badge" class="badge inflight">In flight</div>
+  </header>
+  <main class="layout">
+    <section class="stage-wrap">
+      <p class="eyebrow">Task</p>
+      <p id="question" class="question">Loading a saved engine trace.</p>
+      <div class="stage" id="stage">
+        <div class="orbit" aria-hidden="true"><i></i><i></i></div>
+        <div class="ring"><span id="mark">Orbit</span></div>
+        <div id="titlecard" class="titlecard">
+          <p class="kicker">Orbit</p>
+          <h1>Multi-Agent Mission Control</h1>
+          <p id="title-question"></p>
+          <p id="title-harness" class="title-harness" hidden>Scripted harness</p>
+        </div>
+        <div class="seat planner" id="seat-planner">Planner<small>Plan</small></div>
+        <div class="seat worker" id="seat-worker">Worker<small>Tools</small></div>
+        <div class="seat critic" id="seat-critic">Critic<small>Check</small></div>
+        <div id="pulse-trail" class="pulse trail"></div>
+        <div id="pulse" class="pulse"></div>
+        <div id="dock" class="dock">Tool</div>
+      </div>
+      <div class="controls">
+        <button type="button" id="play" aria-pressed="false">Play</button>
+        <button type="button" id="pause">Pause</button>
+        <input id="scrub" class="scrub" type="range" min="0" max="0" value="0" aria-label="Scrub the replay">
+        <label class="speed">Speed
+          <select id="speed" aria-label="Replay speed">
+            <option value="1">1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
+        <label class="speed">Trace
+          <select id="trace" aria-label="Saved trace"></select>
+        </label>
+      </div>
+      <form id="live" class="live">
+        <h2>Run a task on this machine</h2>
+        <div class="fields">
+          <label>Bundled task id
+            <input id="task-id" name="task_id" placeholder="dev-001" autocomplete="off">
+          </label>
+          <label>Backend
+            <select id="backend" name="backend">
+              <option value="scripted">Scripted harness</option>
+              <option value="transformers">Transformers</option>
+              <option value="ollama">Ollama</option>
+              <option value="llamacpp">llama.cpp</option>
+            </select>
+          </label>
+          <label>Model
+            <input id="model" name="model" value="Qwen/Qwen2.5-0.5B-Instruct">
+          </label>
+          <label>Your question
+            <textarea id="ask" name="question" placeholder="Ask something the bundled corpus can check. A free-form question needs a local model."></textarea>
+          </label>
+        </div>
+        <button type="submit">Run</button>
+        <p id="notice" class="notice" role="status"></p>
+      </form>
+    </section>
+    <aside class="side">
+      <h2>Mission log</h2>
+      <p class="clock-note">T+ is a replay clock. Each event advances it by four seconds. Those marks are not measured latency.</p>
+      <ol id="log" class="log"></ol>
+      <h2>Flight rules</h2>
+      <div id="rules" class="rules"></div>
+    </aside>
+  </main>
+  <script src="replay.js"></script>
+</body>
+</html>

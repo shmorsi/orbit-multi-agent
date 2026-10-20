@@ -1,0 +1,10 @@
+{
+  "status": "pending",
+  "kind": "model_eval",
+  "metrics": null,
+  "mode": "team",
+  "backend": "transformers",
+  "adapter": "finetune/outputs/adapter",
+  "command": "python -m orbit_agents.eval.run --split test --mode team --backend transformers --model Qwen/Qwen2.5-0.5B-Instruct --adapter finetune/outputs/adapter --out results/team_lora.json",
+  "note": "No adapter has been trained in this repository, so this score is pending."
+}

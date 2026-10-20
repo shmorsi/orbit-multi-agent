@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+.ipynb_checkpoints/
+finetune/outputs/
+traces/*
+!traces/.gitkeep
+demo/frames/
+results/doctor.json
+*.duckdb

@@ -1,0 +1,33 @@
+{
+  "corpus": "makerspace",
+  "files": {
+    "docs/laser.md": {
+      "sha256": "7ad19c32fdd023891c9cdd781b08189da6e8a48d27abfd35985147e4fc054b10",
+      "bytes": 116
+    },
+    "docs/printers.md": {
+      "sha256": "a3f6cb1f9204e6d466a93028be6ad2d3454443aba8d050776ef88a0a288eed86",
+      "bytes": 170
+    },
+    "docs/shifts.md": {
+      "sha256": "ea789e8a3431da13654ef0b954df41b842464c2416833cc3f0d35e09b5e5bc0f",
+      "bytes": 181
+    },
+    "jobs.csv": {
+      "sha256": "dbd90d179b649ac1fea103e70e70bbcc74cf5ec6ba595d64cfb3bf1634d7b9f5",
+      "bytes": 665
+    },
+    "logs/printer-a.log": {
+      "sha256": "08c2ea961fe0b4944aef437d50b5a1296effd478a083209afa633711fdfe1299",
+      "bytes": 274
+    },
+    "shifts.csv": {
+      "sha256": "a04b34615aac143910ea19af49ff491a22440330828979b06dab6101a6e0e567",
+      "bytes": 241
+    },
+    "web_cache.json": {
+      "sha256": "514206ac036fe74cf0670edd784e2addb84af4c07c79a6dc7fa3feb22c880ad0",
+      "bytes": 286
+    }
+  }
+}

@@ -1,0 +1,17 @@
+job_id,machine,material,day,minutes,outcome,grams
+J01,printer-a,pla,2024-06-03,42,ok,18
+J02,printer-a,pla,2024-06-03,15,fail,4
+J03,printer-b,petg,2024-06-04,80,ok,40
+J04,laser,plywood,2024-06-04,12,ok,0
+J05,printer-b,pla,2024-06-05,55,ok,22
+J06,printer-a,petg,2024-06-05,30,fail,9
+J07,laser,acrylic,2024-06-06,20,ok,0
+J08,printer-c,pla,2024-06-06,100,ok,48
+J09,printer-b,pla,2024-06-07,25,fail,6
+J10,printer-a,pla,2024-06-08,60,ok,27
+J11,laser,plywood,2024-06-08,8,fail,0
+J12,printer-c,petg,2024-06-09,90,ok,51
+J13,printer-b,petg,2024-06-10,40,ok,19
+J14,printer-a,pla,2024-06-11,33,ok,14
+J15,printer-c,pla,2024-06-12,70,fail,20
+J16,laser,acrylic,2024-06-12,16,ok,0

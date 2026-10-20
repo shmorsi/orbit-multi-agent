@@ -1,0 +1,9 @@
+{
+  "status": "pending",
+  "kind": "model_eval",
+  "metrics": null,
+  "mode": "team",
+  "backend": "transformers",
+  "command": "python -m orbit_agents.eval.run --split test --mode team --backend transformers --model Qwen/Qwen2.5-0.5B-Instruct --out results/team_base.json",
+  "note": "No language-model score has been measured. Do not fill this file in by hand."
+}
