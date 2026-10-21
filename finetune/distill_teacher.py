@@ -9,11 +9,13 @@ Cost controls, all on by default:
 - hard cap on API requests (800)
 - about 8 requests per minute
 - resume from a checkpoint, and the cap counts requests already spent
-- HTTP 429, quota errors, and network failures stop the process
-- a failed call is not retried
+- one preflight request, then the task loop
+- HTTP 429 and quota errors stop the process and are not retried
+- any other 4xx (400, 401, 403, 404, and the rest) stops the process immediately
+- a 5xx response is retried a few times, then the process stops
 
 The key is read from ORBIT_TEACHER_API_KEY. This script does not call the API
-during --dry-run, and it has no retry loop.
+during --dry-run.
 
     python finetune/distill_teacher.py --dry-run
     ORBIT_TEACHER_API_KEY=... python finetune/distill_teacher.py \\
@@ -57,10 +59,12 @@ from variants import materialize_variants  # noqa: E402
 
 DEV_PATH = ROOT / "eval" / "dev.jsonl"
 DEFAULT_OUTPUT = ROOT / "finetune" / "data" / "distill"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_MAX_REQUESTS = 800
 DEFAULT_REQUESTS_PER_MINUTE = 8.0
 DEFAULT_ATTEMPTS = 3
+SERVER_ATTEMPTS = 3
+PREFLIGHT_PROMPT = "Reply with an empty JSON object."
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 CHECKPOINT_VERSION = 1
 
@@ -87,11 +91,15 @@ class NetworkStop(DistillStop):
         super().__init__("network", detail)
 
 
-class TeacherHTTPError(DistillStop):
-    """One non-quota HTTP error. The caller does not send that payload again."""
+class FatalHTTPStop(DistillStop):
+    """A non-retryable HTTP error. No further requests are sent."""
 
     def __init__(self, detail: str):
         super().__init__("http", detail)
+
+
+class TeacherHTTPError(FatalHTTPStop):
+    """Backward-compatible name for a non-retryable HTTP client error."""
 
 
 class RequestBudget:
@@ -122,12 +130,15 @@ class RequestBudget:
         self.candidates_tokens = 0
         self.total_tokens = 0
         self.stop_reason: str | None = None
+        self.stop_detail = ""
 
     def acquire(self) -> None:
         if self.stop_reason == "quota":
-            raise QuotaStop("stopped after a quota response")
+            raise QuotaStop(self.stop_detail or "stopped after a quota response")
         if self.stop_reason == "network":
-            raise NetworkStop("stopped after a network failure")
+            raise NetworkStop(self.stop_detail or "stopped after a network failure")
+        if self.stop_reason == "http":
+            raise FatalHTTPStop(self.stop_detail or "stopped after an HTTP client error")
         if self.stop_reason == "request_cap" or self.used >= self.max_requests:
             self.stop_reason = "request_cap"
             raise BudgetStop()
@@ -359,6 +370,7 @@ def fresh_state() -> dict:
         "total_tokens": 0,
         "last_request_at": None,
         "stopped_reason": None,
+        "stopped_detail": "",
         "attempts": 0,
         "tasks": {},
         "train_rows": [],
@@ -376,6 +388,7 @@ def load_checkpoint(path: Path) -> dict:
     state.setdefault("train_rows", [])
     state.setdefault("tune_rows", [])
     state.setdefault("attempts", 0)
+    state.setdefault("stopped_detail", "")
     return state
 
 
@@ -399,7 +412,7 @@ def run_distill(
     state: dict | None = None,
     budget: RequestBudget | None = None,
 ) -> dict:
-    """Rejection-sample team runs. Stops cleanly on quota, cap, network, or leakage."""
+    """Rejection-sample team runs. A client or quota error stops the run."""
     state = state or fresh_state()
     if attempts < 1:
         raise ValueError("attempts must be at least 1")
@@ -425,17 +438,12 @@ def run_distill(
                 state["stopped_reason"] = "leakage"
                 state["tasks"][task["id"]] = record
                 raise DistillStop("leakage", exc.detail) from exc
-            except (QuotaStop, BudgetStop, NetworkStop) as exc:
+            except (QuotaStop, BudgetStop, NetworkStop, FatalHTTPStop) as exc:
                 sync_budget(state, budget)
                 state["stopped_reason"] = exc.reason
+                state["stopped_detail"] = exc.detail
                 state["tasks"][task["id"]] = record
                 return state
-            except TeacherHTTPError:
-                record["attempts"] += 1
-                state["attempts"] += 1
-                record["last_reject"] = "http"
-                sync_budget(state, budget)
-                continue
             record["attempts"] += 1
             state["attempts"] += 1
             ok, why = trajectory_ok(task, result)
@@ -487,6 +495,7 @@ def build_stats(state: dict, pool: list[dict], *, model: str, max_requests: int,
         "candidates_tokens": state["candidates_tokens"],
         "total_tokens": state["total_tokens"],
         "stopped_reason": state.get("stopped_reason"),
+        "stopped_detail": state.get("stopped_detail") or "",
         "attempts": state["attempts"],
         "n_accepted_tasks": sum(1 for record in state["tasks"].values() if record.get("accepted")),
         "n_train_dialogs": len(state["train_rows"]),
@@ -558,6 +567,33 @@ def is_quota(status: int, body: dict) -> bool:
     return "resource_exhausted" in text or "quota" in text
 
 
+def http_detail(status: int, body: dict, model: str) -> str:
+    error = body.get("error") if isinstance(body, dict) else None
+    message = ""
+    if isinstance(error, dict):
+        message = str(error.get("message") or "")
+    elif error:
+        message = str(error)
+    message = " ".join(message.split())
+    if len(message) > 500:
+        message = message[:500].rstrip()
+    base = f"HTTP {status} from model {model}"
+    if message:
+        return f"{base}: {message}"
+    return base
+
+
+def _body_from_raw(raw: bytes, status: int) -> dict:
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError:
+        text = raw.decode("utf-8", errors="replace").strip()
+        return {"error": {"message": text[:500] or f"non-JSON body, status {status}"}}
+    if not isinstance(body, dict):
+        return {"error": {"message": f"response status {status} was not an object"}}
+    return body
+
+
 def to_gemini(messages: list[dict]) -> tuple[str, list[dict]]:
     systems: list[str] = []
     contents: list[dict] = []
@@ -589,13 +625,7 @@ def default_transport(url: str, headers: dict, payload: dict, timeout: float) ->
         status = int(exc.code)
     except urllib.error.URLError as exc:
         raise NetworkStop(str(exc.reason)) from exc
-    try:
-        body = json.loads(raw.decode("utf-8"))
-    except json.JSONDecodeError as exc:
-        raise TeacherHTTPError(f"non-JSON response status {status}") from exc
-    if not isinstance(body, dict):
-        raise TeacherHTTPError(f"response status {status} was not an object")
-    return status, body
+    return status, _body_from_raw(raw, status)
 
 
 class GeminiClient:
@@ -625,7 +655,7 @@ class GeminiClient:
         self.log = log or (lambda event: print(json.dumps(event), flush=True))
 
     def generate(self, messages: list[dict]) -> str:
-        self.budget.acquire()
+        """Send one prompt. 5xx is retried up to SERVER_ATTEMPTS. Any other error stops."""
         system, contents = to_gemini(messages)
         payload = {
             "contents": contents,
@@ -639,23 +669,44 @@ class GeminiClient:
             payload["systemInstruction"] = {"parts": [{"text": system}]}
         url = GEMINI_URL.format(model=self.model)
         headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
-        try:
-            status, body = self.transport(url, headers, payload, self.timeout)
-        except DistillStop:
-            self._emit(status=None)
-            raise
-        prompt, candidates, total = _usage(body)
-        self.budget.add_usage(prompt, candidates, total)
-        self._emit(status=status)
-        if is_quota(status, body):
-            self.budget.stop_reason = "quota"
-            raise QuotaStop(f"HTTP {status}")
-        if status >= 500:
-            self.budget.stop_reason = "network"
-            raise NetworkStop(f"HTTP {status}")
-        if status != 200:
-            raise TeacherHTTPError(f"HTTP {status}")
-        return _text_from_body(body)
+        last_detail = ""
+        for attempt in range(SERVER_ATTEMPTS):
+            self.budget.acquire()
+            try:
+                status, body = self.transport(url, headers, payload, self.timeout)
+            except DistillStop:
+                self._emit(status=None)
+                raise
+            prompt, candidates, total = _usage(body)
+            self.budget.add_usage(prompt, candidates, total)
+            self._emit(status=status)
+            if is_quota(status, body):
+                detail = http_detail(status, body, self.model)
+                self.budget.stop_reason = "quota"
+                self.budget.stop_detail = detail
+                raise QuotaStop(detail)
+            if status >= 500:
+                last_detail = (
+                    f"{http_detail(status, body, self.model)}. "
+                    f"Server error after {attempt + 1} of {SERVER_ATTEMPTS} requests."
+                )
+                if attempt + 1 < SERVER_ATTEMPTS:
+                    continue
+                self.budget.stop_reason = "network"
+                self.budget.stop_detail = last_detail
+                raise NetworkStop(last_detail)
+            if status != 200:
+                detail = (
+                    f"{http_detail(status, body, self.model)}. "
+                    "This status is not retried."
+                )
+                self.budget.stop_reason = "http"
+                self.budget.stop_detail = detail
+                raise FatalHTTPStop(detail)
+            return _text_from_body(body)
+        self.budget.stop_reason = "network"
+        self.budget.stop_detail = last_detail or "server error"
+        raise NetworkStop(self.budget.stop_detail)
 
     def _emit(self, status: int | None) -> None:
         self.log(
@@ -678,6 +729,33 @@ class TeacherBackend:
     def complete(self, *, role: str, messages: list[dict]) -> str:
         del role
         return self.client.generate(messages)
+
+
+def preflight(client: GeminiClient) -> None:
+    """One request with no task text. A dead model or key fails before the loop."""
+    client.generate([{"role": "user", "content": PREFLIGHT_PROMPT}])
+
+
+def report_stop(reason: str | None, detail: str, requests: int) -> None:
+    print(
+        json.dumps({"event": "stop", "reason": reason, "detail": detail, "requests": requests}),
+        flush=True,
+    )
+    if reason == "http":
+        print(
+            f"Stopped: {detail} No further requests will be sent.",
+            file=sys.stderr,
+        )
+    elif reason in {"network", "quota"} and detail:
+        print(f"Stopped: {detail}", file=sys.stderr)
+
+
+def stop_exit_code(reason: str | None) -> int | None:
+    if reason == "quota":
+        return 2
+    if reason in {"http", "network", "leakage"}:
+        return 1
+    return None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -747,7 +825,9 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                     "attempts_per_task": args.attempts,
                     "n_tasks": len(kept),
                     "note": (
-                        "Each request is sent once. HTTP 429 and quota errors stop the run. "
+                        "A preflight request runs first. HTTP 429 and quota errors stop the run "
+                        "and are not retried. Any other 4xx stops the run on that response. "
+                        "A 5xx response is retried a few times, then the run stops. "
                         "The cap is cumulative across resumes. "
                         "A key on a billed Google project can still incur charges up to this cap; "
                         "confirm billing is off before starting."
@@ -769,6 +849,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
             return TeacherBackend(client)
 
         try:
+            preflight(client)
             state = run_distill(
                 kept,
                 test_rows,
@@ -780,6 +861,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
             )
         except DistillStop as exc:
             state["stopped_reason"] = exc.reason
+            state["stopped_detail"] = exc.detail
             sync_budget(state, budget)
             stats = build_stats(
                 state,
@@ -791,8 +873,11 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
             )
             stats["n_dropped_leakage"] = len(dropped)
             write_dataset(output, state, stats)
-            print(json.dumps({"event": "stop", "reason": exc.reason, "detail": exc.detail, "requests": budget.used}))
-            raise SystemExit(1) from exc
+            report_stop(exc.reason, exc.detail, budget.used)
+            code = stop_exit_code(exc.reason)
+            if code is not None:
+                raise SystemExit(code) from exc
+            return stats
         stats = build_stats(
             state,
             kept,
@@ -803,9 +888,11 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
         )
         stats["n_dropped_leakage"] = len(dropped)
         write_dataset(output, state, stats)
-        print(json.dumps({"event": "stop", "reason": state.get("stopped_reason"), "requests": state["requests"]}))
-        if state.get("stopped_reason") == "quota":
-            raise SystemExit(2)
+        reason = state.get("stopped_reason")
+        report_stop(reason, state.get("stopped_detail") or "", state["requests"])
+        code = stop_exit_code(reason)
+        if code is not None:
+            raise SystemExit(code)
         return stats
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

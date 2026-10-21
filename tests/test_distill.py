@@ -9,14 +9,18 @@ import pytest
 from distill_teacher import (
     DEFAULT_ATTEMPTS,
     DEFAULT_MAX_REQUESTS,
+    DEFAULT_MODEL,
     DEFAULT_REQUESTS_PER_MINUTE,
+    PREFLIGHT_PROMPT,
+    SERVER_ATTEMPTS,
     BudgetStop,
     DistillStop,
+    FatalHTTPStop,
     FROZEN_FRAGMENTS,
     GeminiClient,
+    NetworkStop,
     QuotaStop,
     RequestBudget,
-    TeacherHTTPError,
     build_parser,
     load_checkpoint,
     load_pool,
@@ -44,7 +48,7 @@ def _ok_body(text="{}"):
 def _client(budget, transport, **kwargs):
     return GeminiClient(
         api_key="test-key",
-        model="gemini-2.5-flash",
+        model=DEFAULT_MODEL,
         budget=budget,
         transport=transport,
         log=lambda _event: None,
@@ -166,7 +170,11 @@ def test_quota_body_on_403_stops_without_another_request():
     assert calls["n"] == 1
 
 
-def test_http_400_is_not_retried_inside_the_client():
+def _fast_budget(max_requests=5):
+    return RequestBudget(max_requests, 1000, clock=lambda: 0.0, sleep=lambda _seconds: None)
+
+
+def test_http_400_stops_and_is_not_retried():
     calls = {"n": 0}
 
     def transport(url, headers, payload, timeout):
@@ -174,15 +182,182 @@ def test_http_400_is_not_retried_inside_the_client():
         calls["n"] += 1
         return 400, {"error": {"message": "bad request"}}
 
-    client = _client(
-        RequestBudget(5, 1000, clock=lambda: 0.0, sleep=lambda _seconds: None),
-        transport,
-    )
-    with pytest.raises(TeacherHTTPError):
+    client = _client(_fast_budget(), transport)
+    with pytest.raises(FatalHTTPStop) as caught:
         client.generate([{"role": "user", "content": "Task: one"}])
-    with pytest.raises(TeacherHTTPError):
+    assert "HTTP 400" in str(caught.value)
+    assert "bad request" in str(caught.value)
+    assert "not retried" in str(caught.value)
+    with pytest.raises(FatalHTTPStop):
         client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == 1
+
+
+def test_http_404_stops_with_the_model_message():
+    calls = {"n": 0}
+    message = (
+        "models/gemini-2.5-flash is no longer available to new users, "
+        "use models/gemini-3.8-flash"
+    )
+
+    def transport(url, headers, payload, timeout):
+        del headers, payload, timeout
+        calls["n"] += 1
+        assert DEFAULT_MODEL in url
+        return 404, {"error": {"code": 404, "message": message, "status": "NOT_FOUND"}}
+
+    client = _client(_fast_budget(), transport)
+    with pytest.raises(FatalHTTPStop) as caught:
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert message in str(caught.value)
+    assert "HTTP 404" in str(caught.value)
+    with pytest.raises(FatalHTTPStop):
+        client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == 1
+
+
+def test_http_401_and_403_without_quota_stop_immediately():
+    for status, message in ((401, "API key not valid"), (403, "permission denied")):
+        calls = {"n": 0}
+
+        def transport(url, headers, payload, timeout, status=status, message=message):
+            del url, headers, payload, timeout
+            calls["n"] += 1
+            return status, {"error": {"message": message}}
+
+        client = _client(_fast_budget(), transport)
+        with pytest.raises(FatalHTTPStop) as caught:
+            client.generate([{"role": "user", "content": "Task: one"}])
+        assert f"HTTP {status}" in str(caught.value)
+        assert message in str(caught.value)
+        with pytest.raises(FatalHTTPStop):
+            client.generate([{"role": "user", "content": "Task: two"}])
+        assert calls["n"] == 1
+
+
+def test_http_500_is_retried_a_bounded_number_of_times_then_stops():
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 500, {"error": {"message": "internal"}}
+
+    client = _client(_fast_budget(max_requests=10), transport)
+    with pytest.raises(NetworkStop) as caught:
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert "HTTP 500" in str(caught.value)
+    assert calls["n"] == SERVER_ATTEMPTS
+    with pytest.raises(NetworkStop):
+        client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == SERVER_ATTEMPTS
+
+
+def test_http_500_then_200_returns_the_success():
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 500, {"error": {"message": "internal"}}
+        return 200, _ok_body('{"ok": true}')
+
+    client = _client(_fast_budget(), transport)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == '{"ok": true}'
     assert calls["n"] == 2
+
+
+def test_client_error_stops_the_run_instead_of_the_next_attempt(tmp_path):
+    calls = {"n": 0}
+
+    class Backend:
+        def complete(self, *, role, messages):
+            del role, messages
+            calls["n"] += 1
+            raise FatalHTTPStop("HTTP 404 from model gemini-2.5-flash: model is no longer available")
+
+    tasks = [task_by_id("dev-001"), task_by_id("dev-002")]
+    state = run_distill(
+        tasks,
+        _read(TEST),
+        backend_for=lambda _task: Backend(),
+        attempts=3,
+        workspace=tmp_path,
+    )
+    assert calls["n"] == 1
+    assert state["stopped_reason"] == "http"
+    assert "no longer available" in state["stopped_detail"]
+    assert state["tasks"]["dev-001"]["attempts"] == 0
+    assert "dev-002" not in state["tasks"]
+
+
+def test_preflight_404_stops_before_any_task(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("ORBIT_TEACHER_API_KEY", "test-key")
+    task = task_by_id("dev-001")
+    monkeypatch.setattr("distill_teacher.load_pool", lambda _workspace: [dict(task)])
+    message = (
+        "models/gemini-2.5-flash is no longer available to new users, "
+        "use models/gemini-3.8-flash"
+    )
+    calls = []
+
+    def transport(url, headers, payload, timeout):
+        del headers, timeout
+        calls.append((url, payload))
+        return 404, {"error": {"code": 404, "message": message, "status": "NOT_FOUND"}}
+
+    output = tmp_path / "out"
+    with pytest.raises(SystemExit) as caught:
+        main(
+            ["--output", str(output), "--max-requests", "20", "--requests-per-minute", "1000"],
+            transport=transport,
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
+        )
+    assert caught.value.code == 1
+    assert len(calls) == 1
+    assert DEFAULT_MODEL in calls[0][0]
+    blob = json.dumps(calls[0][1])
+    assert PREFLIGHT_PROMPT in blob
+    assert task["id"] not in blob
+    assert task["question"] not in blob
+    captured = capsys.readouterr()
+    assert message in captured.out
+    assert message in captured.err
+    assert "No further requests will be sent." in captured.err
+    checkpoint = json.loads((output / "checkpoint.json").read_text(encoding="utf-8"))
+    assert checkpoint["requests"] == 1
+    assert checkpoint["stopped_reason"] == "http"
+    assert checkpoint["tasks"] == {}
+
+
+def test_task_404_after_preflight_does_not_keep_spending(monkeypatch, tmp_path):
+    monkeypatch.setenv("ORBIT_TEACHER_API_KEY", "test-key")
+    task = task_by_id("dev-001")
+    monkeypatch.setattr("distill_teacher.load_pool", lambda _workspace: [dict(task)])
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 200, _ok_body("{}")
+        return 404, {"error": {"message": "model is no longer available"}}
+
+    with pytest.raises(SystemExit) as caught:
+        main(
+            ["--output", str(tmp_path / "out"), "--max-requests", "20", "--requests-per-minute", "1000"],
+            transport=transport,
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
+        )
+    assert caught.value.code == 1
+    assert calls["n"] == 2
+    checkpoint = json.loads((tmp_path / "out" / "checkpoint.json").read_text(encoding="utf-8"))
+    assert checkpoint["requests"] == 2
+    assert checkpoint["stopped_reason"] == "http"
+    assert checkpoint["tasks"][task["id"]]["attempts"] == 0
 
 
 def test_resume_counts_spent_requests_against_the_cap():
@@ -297,7 +472,9 @@ def test_budget_defaults_match_the_distill_config():
     assert config["teacher_max_requests"] == DEFAULT_MAX_REQUESTS == args.max_requests == 800
     assert config["teacher_requests_per_minute"] == DEFAULT_REQUESTS_PER_MINUTE == args.requests_per_minute == 8
     assert config["teacher_attempts"] == DEFAULT_ATTEMPTS == args.attempts == 3
-    assert config["teacher_model"] == "gemini-2.5-flash"
+    assert config["teacher_model"] == DEFAULT_MODEL == args.model == "gemini-3.8-flash"
+    assert config["teacher_model_generation"] == 3.8
+    assert config["server_error_attempts"] == SERVER_ATTEMPTS == 3
     assert config["stop_on_http_status"] == 429
     assert config["base_model"] == "Qwen/Qwen2.5-1.5B-Instruct"
     train_path, tune_path = data_paths(config)
