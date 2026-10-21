@@ -105,6 +105,22 @@ def test_near_miss_numbers_stay_grounded_and_unknown_numbers_do_not():
     assert parsed["steps"][0]["tool"] == "python"
 
 
+class _CriticProse(ScriptedBackend):
+    def complete(self, *, role, messages):
+        if role == "critic":
+            return "I accept this."
+        return super().complete(role=role, messages=messages)
+
+
+def test_critic_prose_does_not_hide_a_correct_final():
+    task = task_by_id("dev-001")
+    result = run_team(task, _CriticProse(task), _workspace("dev-001", "critic-prose"))
+    assert result.status == "answer"
+    assert result.answer == task["answer"]
+    assert result.claims == task["gold_claims"]
+    assert result.answer != STOPPED
+
+
 def test_step_limit_stops_a_model_that_never_answers():
     task = task_by_id("dev-001")
     result = run_team(task, _EndlessTool(), _workspace("dev-001", "limit"))

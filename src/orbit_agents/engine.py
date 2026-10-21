@@ -222,7 +222,6 @@ class TeamRun:
                 ],
             )
             self.plan = proposal_plan or {"steps": []}
-        accepted = self.single
         revises = 0
         while self.n_steps < MAX_TURNS:
             proposal = self._until_final(feedback)
@@ -243,7 +242,6 @@ class TeamRun:
                 ],
             )
             if verdict is None or verdict["verdict"] == "accept":
-                accepted = verdict is not None and verdict["verdict"] == "accept"
                 break
             revises += 1
             self._event("critic", "revise", reason=verdict["reason"])
@@ -254,8 +252,9 @@ class TeamRun:
         answer = STOPPED
         claims: list = []
         gate = False
-        if proposal is not None and (self.single or accepted or revises > 0):
-            # A revise that never gets a later accept still exposes the latest proposal to the gate.
+        if proposal is not None:
+            # The checker reads this final. A critic that never returns a verdict
+            # must not replace it with the step-limit sentence.
             status = proposal["status"]
             answer = proposal["answer"]
             claims = proposal["claims"]
