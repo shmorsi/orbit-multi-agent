@@ -1,28 +1,37 @@
-"""Distill planner, worker, and critic trajectories from a Gemini teacher.
+"""Distill planner, worker, and critic trajectories from a Claude or Gemini teacher.
 
 The teacher sees train and tune tasks only. The frozen test file is a local
 blocklist: its questions are never placed in a request body and never written
-as training rows. Tool calls run through Orbit's sandbox.
+as training rows. Tool calls run through Orbit's sandbox. Both providers write
+the same JSONL files. Each kept dialog records the teacher model.
 
-Cost controls, all on by default:
+The default teacher is Anthropic claude-haiku-5-5. A model name that starts
+with claude selects that provider. The key is ORBIT_ANTHROPIC_API_KEY. The
+pace is about 20 requests per minute. A price table estimates USD from input
+and output tokens; an unknown model uses a high fallback price. The run stops
+at 5 USD, and on a credit-balance or other billing error. HTTP 429 and server
+errors, including 529, wait 20s, then 40s, then 80s.
 
-- hard cap on API requests (800)
-- about 4 requests per minute
-- resume from a checkpoint, and the cap counts requests already spent
+Gemini stays available with --provider gemini and ORBIT_TEACHER_API_KEY.
+That path keeps the free-tier pace of about 4 requests per minute and does
+not apply the dollar limit. Gemma model names fold the system text into the
+first user turn. A per-minute HTTP 429 with a stated delay of 120s or less
+waits once; a per-day quota or a second consecutive 429 stops.
+
+Shared controls:
+
+- hard cap on API requests (800), counted across resumes
 - one preflight request, then the task loop
+- any 4xx other than 429 stops on that response
 - HTTP 503 waits 20s, then 40s, then 80s; each retry counts toward the cap
-- a per-minute HTTP 429 with a stated delay of 120s or less waits once and continues
-- a per-day quota, a longer delay, or a second consecutive 429 stops and saves the checkpoint
-- any other 4xx (400, 401, 403, 404, and the rest) stops the process immediately
 - another 5xx is retried a few times, then the process stops
-- Gemma model names send the system text in the first user turn
 
-The key is read from ORBIT_TEACHER_API_KEY. This script does not call the API
-during --dry-run.
+This script does not call the API during --dry-run.
 
     python finetune/distill_teacher.py --dry-run
-    ORBIT_TEACHER_API_KEY=... python finetune/distill_teacher.py \\
-        --max-requests 800 --requests-per-minute 4 --attempts 3 \\
+    ORBIT_ANTHROPIC_API_KEY=... python finetune/distill_teacher.py \\
+        --provider anthropic --model claude-haiku-5-5 \\
+        --max-requests 800 --requests-per-minute 20 --max-cost-usd 5 \\
         --output finetune/data/distill
 """
 
@@ -63,14 +72,40 @@ from variants import materialize_variants  # noqa: E402
 
 DEV_PATH = ROOT / "eval" / "dev.jsonl"
 DEFAULT_OUTPUT = ROOT / "finetune" / "data" / "distill"
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5"
+DEFAULT_MODEL = DEFAULT_ANTHROPIC_MODEL
 DEFAULT_MAX_REQUESTS = 800
 DEFAULT_REQUESTS_PER_MINUTE = 4.0
+ANTHROPIC_REQUESTS_PER_MINUTE = 20.0
+DEFAULT_MAX_COST_USD = 5.0
 DEFAULT_ATTEMPTS = 3
 SERVER_ATTEMPTS = 3
 SERVER_BACKOFF_SECONDS = (20, 40, 80)
 HIGH_DEMAND_STATUS = 503
 MINUTE_QUOTA_MAX_WAIT_SECONDS = 120
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+LONG_CONTEXT_TOKENS = 100_000
+# USD per million tokens. Base input/output from the published Claude API list.
+# Haiku 5.5 uses the higher tier once the prompt is past LONG_CONTEXT_TOKENS.
+# An unknown model uses FALLBACK_PRICE, which is the retired Opus 4.1 list price,
+# above every current model, so a cost cap cannot be under-counted.
+ANTHROPIC_PRICES = {
+    "claude-haiku-5-5": {
+        "input": 0.1,
+        "output": 0.5,
+        "input_over_long_context": 0.5,
+        "output_over_long_context": 2.5,
+    },
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
+    "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
+    "claude-sonnet-5-5": {"input": 2.0, "output": 10.0},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
+    "claude-opus-5-5": {"input": 4.0, "output": 20.0},
+    "claude-opus-5": {"input": 5.0, "output": 25.0},
+}
+FALLBACK_PRICE = {"input": 15.0, "output": 75.0}
 PREFLIGHT_PROMPT = "Reply with an empty JSON object."
 _RETRY_IN_RE = re.compile(r"retry in\s+([0-9]+(?:\.[0-9]+)?)\s*s\b", re.IGNORECASE)
 _DELAY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)s$", re.IGNORECASE)
@@ -111,6 +146,16 @@ class TeacherHTTPError(FatalHTTPStop):
     """Backward-compatible name for a non-retryable HTTP client error."""
 
 
+class BillingStop(DistillStop):
+    def __init__(self, detail: str):
+        super().__init__("billing", detail)
+
+
+class CostStop(DistillStop):
+    def __init__(self, detail: str):
+        super().__init__("cost", detail)
+
+
 class RequestBudget:
     """Counts every outbound call and spaces them out. The count survives a resume."""
 
@@ -144,6 +189,9 @@ class RequestBudget:
         self.started_at: float | None = None
         self.session_used = 0
         self.consecutive_429 = 0
+        self.estimated_cost_usd = 0.0
+        self.price_source = ""
+        self.track_cost = False
 
     def acquire(self) -> None:
         if self.stop_reason == "quota":
@@ -152,6 +200,10 @@ class RequestBudget:
             raise NetworkStop(self.stop_detail or "stopped after a network failure")
         if self.stop_reason == "http":
             raise FatalHTTPStop(self.stop_detail or "stopped after an HTTP client error")
+        if self.stop_reason == "billing":
+            raise BillingStop(self.stop_detail or "stopped after a billing error")
+        if self.stop_reason == "cost":
+            raise CostStop(self.stop_detail or "stopped after the cost limit")
         if self.stop_reason == "request_cap" or self.used >= self.max_requests:
             self.stop_reason = "request_cap"
             raise BudgetStop()
@@ -366,7 +418,7 @@ def retarget_rows(task: dict, rows: list[dict]) -> list[dict]:
     return rows
 
 
-def rows_from_result(task: dict, result) -> list[dict]:
+def rows_from_result(task: dict, result, *, teacher_model: str = "") -> list[dict]:
     rows = []
     for example in result.examples:
         if example["role"] not in {"planner", "worker", "critic"}:
@@ -376,6 +428,7 @@ def rows_from_result(task: dict, result) -> list[dict]:
                 "id": task["id"],
                 "role": example["role"],
                 "messages": copy.deepcopy(example["messages"]),
+                "metadata": {"teacher_model": teacher_model},
             }
         )
     return retarget_rows(task, rows)
@@ -431,6 +484,8 @@ def sync_budget(state: dict, budget: RequestBudget | None) -> None:
     state["total_tokens"] = budget.total_tokens
     state["last_request_at"] = budget.last_request_at
     state["status_counts"] = budget.status_count_map()
+    state["estimated_cost_usd"] = budget.estimated_cost_usd
+    state["price_source"] = budget.price_source
 
 
 def run_distill(
@@ -442,6 +497,7 @@ def run_distill(
     workspace: Path,
     state: dict | None = None,
     budget: RequestBudget | None = None,
+    teacher_model: str = "",
 ) -> dict:
     """Rejection-sample team runs. A client or quota error stops the run."""
     state = state or fresh_state()
@@ -469,7 +525,7 @@ def run_distill(
                 state["stopped_reason"] = "leakage"
                 state["tasks"][task["id"]] = record
                 raise DistillStop("leakage", exc.detail) from exc
-            except (QuotaStop, BudgetStop, NetworkStop, FatalHTTPStop) as exc:
+            except (QuotaStop, BudgetStop, NetworkStop, FatalHTTPStop, BillingStop, CostStop) as exc:
                 sync_budget(state, budget)
                 state["stopped_reason"] = exc.reason
                 state["stopped_detail"] = exc.detail
@@ -479,7 +535,7 @@ def run_distill(
             state["attempts"] += 1
             ok, why = trajectory_ok(task, result)
             if ok:
-                rows = rows_from_result(task, result)
+                rows = rows_from_result(task, result, teacher_model=teacher_model)
                 leak = overlap_error(rows, [], test_rows)
                 if leak:
                     ok = False
@@ -497,7 +553,16 @@ def run_distill(
     return state
 
 
-def build_stats(state: dict, pool: list[dict], *, model: str, max_requests: int, per_minute: float, attempts: int) -> dict:
+def build_stats(
+    state: dict,
+    pool: list[dict],
+    *,
+    model: str,
+    max_requests: int,
+    per_minute: float,
+    attempts: int,
+    provider: str = "gemini",
+) -> dict:
     families: dict[str, dict] = {}
     for task in pool:
         bucket = families.setdefault(
@@ -518,6 +583,8 @@ def build_stats(state: dict, pool: list[dict], *, model: str, max_requests: int,
             bucket["pass_rate"] = bucket["accepted"] / bucket["attempts"]
     return {
         "model": model,
+        "teacher_model": model,
+        "provider": provider,
         "max_requests": max_requests,
         "requests_per_minute": per_minute,
         "attempts_per_task": attempts,
@@ -525,6 +592,10 @@ def build_stats(state: dict, pool: list[dict], *, model: str, max_requests: int,
         "prompt_tokens": state["prompt_tokens"],
         "candidates_tokens": state["candidates_tokens"],
         "total_tokens": state["total_tokens"],
+        "input_tokens": state["prompt_tokens"],
+        "output_tokens": state["candidates_tokens"],
+        "estimated_cost_usd": state.get("estimated_cost_usd") or 0,
+        "price_source": state.get("price_source") or "",
         "status_counts": state.get("status_counts") or {},
         "stopped_reason": state.get("stopped_reason"),
         "stopped_detail": state.get("stopped_detail") or "",
@@ -631,6 +702,38 @@ def minute_quota_wait(body: dict) -> float | None:
     if "per minute" not in text and "retry in" not in text and "retrydelay" not in text:
         return None
     return delay
+
+
+def _price_matches(model: str, key: str) -> bool:
+    return model == key or model.startswith(key + "-") or model.startswith(key + "@")
+
+
+def price_for(model: str, input_tokens: int) -> tuple[dict, str]:
+    """Return {input, output} USD per million tokens and 'table' or 'fallback'."""
+    chosen = None
+    for key in sorted(ANTHROPIC_PRICES, key=len, reverse=True):
+        if _price_matches(model, key):
+            chosen = ANTHROPIC_PRICES[key]
+            break
+    if chosen is None:
+        return dict(FALLBACK_PRICE), "fallback"
+    if input_tokens > LONG_CONTEXT_TOKENS and "input_over_long_context" in chosen:
+        return {
+            "input": chosen["input_over_long_context"],
+            "output": chosen["output_over_long_context"],
+        }, "table"
+    return {"input": chosen["input"], "output": chosen["output"]}, "table"
+
+
+def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> tuple[float, str]:
+    price, source = price_for(model, input_tokens)
+    cost = (input_tokens * price["input"] + output_tokens * price["output"]) / 1_000_000
+    return cost, source
+
+
+def is_billing(body: dict) -> bool:
+    text = json.dumps(body).lower()
+    return "credit balance is too low" in text or "billing" in text or "purchase credits" in text
 
 
 def http_detail(status: int, body: dict, model: str) -> str:
@@ -853,6 +956,187 @@ class GeminiClient:
                 "prompt_tokens": self.budget.prompt_tokens,
                 "candidates_tokens": self.budget.candidates_tokens,
                 "total_tokens": self.budget.total_tokens,
+                "input_tokens": self.budget.prompt_tokens,
+                "output_tokens": self.budget.candidates_tokens,
+                "estimated_cost_usd": self.budget.estimated_cost_usd if self.budget.track_cost else None,
+                "status": status,
+                "configured_requests_per_minute": self.budget.per_minute,
+                "effective_requests_per_minute": self.budget.effective_per_minute(),
+                "status_counts": self.budget.status_count_map(),
+            }
+        )
+
+
+def _anthropic_usage(body: dict) -> tuple[int, int, int]:
+    usage = body.get("usage") or {}
+    prompt = int(usage.get("input_tokens") or 0)
+    output = int(usage.get("output_tokens") or 0)
+    return prompt, output, prompt + output
+
+
+def _text_from_anthropic(body: dict) -> str:
+    parts = body.get("content") or []
+    texts = [
+        part.get("text", "")
+        for part in parts
+        if isinstance(part, dict) and part.get("type", "text") == "text"
+    ]
+    return "\n".join(text for text in texts if text).strip()
+
+
+def to_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
+    system, contents = to_gemini(messages)
+    converted: list[dict] = []
+    for item in contents:
+        role = "assistant" if item["role"] == "model" else "user"
+        text = item["parts"][0]["text"]
+        if converted and converted[-1]["role"] == role:
+            converted[-1]["content"] += "\n" + text
+        else:
+            converted.append({"role": role, "content": text})
+    return system, converted
+
+
+class AnthropicClient:
+    """Claude Messages API. 429, 529, and other 5xx back off. Billing stops the run."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        budget: RequestBudget,
+        max_cost_usd: float,
+        transport=None,
+        temperature: float = 0.4,
+        max_output_tokens: int = 512,
+        timeout: float = 60.0,
+        log=None,
+    ):
+        if not api_key:
+            raise ValueError("missing API key")
+        if not all(char.isalnum() or char in "._-" for char in model):
+            raise ValueError(f"refusing model name {model!r}")
+        if max_cost_usd < 0:
+            raise ValueError("max_cost_usd must be zero or more")
+        self.api_key = api_key
+        self.model = model
+        self.budget = budget
+        self.max_cost_usd = float(max_cost_usd)
+        self.budget.track_cost = True
+        self.transport = default_transport if transport is None else transport
+        self.temperature = temperature
+        self.max_output_tokens = max_output_tokens
+        self.timeout = timeout
+        self.log = log or (lambda event: print(json.dumps(event), flush=True))
+
+    def generate(self, messages: list[dict]) -> str:
+        self._raise_if_cost_reached()
+        system, contents = to_anthropic(messages)
+        payload = {
+            "model": self.model,
+            "max_tokens": self.max_output_tokens,
+            "temperature": self.temperature,
+            "messages": contents,
+        }
+        if system:
+            payload["system"] = system
+        headers = {
+            "content-type": "application/json",
+            "x-api-key": self.api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
+        backoff_index = 0
+        while True:
+            self.budget.acquire()
+            try:
+                status, body = self.transport(ANTHROPIC_URL, headers, payload, self.timeout)
+            except DistillStop:
+                self._emit(status=None)
+                raise
+            prompt, output, total = _anthropic_usage(body)
+            added, source = estimate_cost_usd(self.model, prompt, output)
+            self.budget.add_usage(prompt, output, total)
+            self.budget.estimated_cost_usd += added
+            if source == "fallback":
+                self.budget.price_source = "fallback"
+            elif self.budget.price_source != "fallback":
+                self.budget.price_source = source
+            self.budget.note_status(status)
+            self._emit(status=status)
+            if is_billing(body):
+                detail = (
+                    f"{http_detail(status, body, self.model)}. "
+                    "A billing error stopped the run. The checkpoint is saved."
+                )
+                self.budget.stop_reason = "billing"
+                self.budget.stop_detail = detail
+                raise BillingStop(detail)
+            if status == 429 or status >= 500:
+                if backoff_index >= len(SERVER_BACKOFF_SECONDS):
+                    detail = (
+                        f"{http_detail(status, body, self.model)}. "
+                        "Backoff is exhausted, so the run stopped."
+                    )
+                    self.budget.stop_reason = "network"
+                    self.budget.stop_detail = detail
+                    raise NetworkStop(detail)
+                delay = SERVER_BACKOFF_SECONDS[backoff_index]
+                backoff_index += 1
+                self._wait(delay, status)
+                continue
+            if status != 200:
+                detail = (
+                    f"{http_detail(status, body, self.model)}. "
+                    "This status is not retried."
+                )
+                self.budget.stop_reason = "http"
+                self.budget.stop_detail = detail
+                raise FatalHTTPStop(detail)
+            self._raise_if_cost_reached()
+            return _text_from_anthropic(body)
+
+    def _raise_if_cost_reached(self) -> None:
+        if self.budget.estimated_cost_usd < self.max_cost_usd:
+            return
+        if self.budget.estimated_cost_usd == 0 and self.max_cost_usd == 0:
+            detail = "The cost limit is 0 USD, so no request was sent."
+        else:
+            detail = (
+                f"Estimated cost {self.budget.estimated_cost_usd:.6f} USD reached "
+                f"the {self.max_cost_usd:g} USD limit. The run stopped and the checkpoint is saved."
+            )
+        self.budget.stop_reason = "cost"
+        self.budget.stop_detail = detail
+        raise CostStop(detail)
+
+    def _wait(self, seconds: float, status: int) -> None:
+        self.log(
+            {
+                "event": "wait",
+                "status": status,
+                "sleep_sec": seconds,
+                "requests": self.budget.used,
+                "estimated_cost_usd": self.budget.estimated_cost_usd,
+                "input_tokens": self.budget.prompt_tokens,
+                "output_tokens": self.budget.candidates_tokens,
+            }
+        )
+        self.budget.sleep(seconds)
+
+    def _emit(self, status: int | None) -> None:
+        self.log(
+            {
+                "event": "request",
+                "requests": self.budget.used,
+                "max_requests": self.budget.max_requests,
+                "prompt_tokens": self.budget.prompt_tokens,
+                "candidates_tokens": self.budget.candidates_tokens,
+                "total_tokens": self.budget.total_tokens,
+                "input_tokens": self.budget.prompt_tokens,
+                "output_tokens": self.budget.candidates_tokens,
+                "estimated_cost_usd": self.budget.estimated_cost_usd,
+                "price_source": self.budget.price_source,
                 "status": status,
                 "configured_requests_per_minute": self.budget.per_minute,
                 "effective_requests_per_minute": self.budget.effective_per_minute(),
@@ -870,9 +1154,27 @@ class TeacherBackend:
         return self.client.generate(messages)
 
 
-def preflight(client: GeminiClient) -> None:
+def preflight(client) -> None:
     """One request with no task text. A dead model or key fails before the loop."""
     client.generate([{"role": "user", "content": PREFLIGHT_PROMPT}])
+
+
+def _start_note(provider: str) -> str:
+    if provider == "anthropic":
+        return (
+            "A preflight request runs first. HTTP 429 and server errors wait 20s, then 40s, then 80s. "
+            "Any other 4xx stops on that response. A billing error or the cost limit stops the run "
+            "and saves the checkpoint. The request cap and the cost estimate are cumulative across resumes."
+        )
+    return (
+        "A preflight request runs first. HTTP 503 waits 20s, then 40s, then 80s. "
+        "A per-minute 429 with a stated delay of 120s or less waits once. "
+        "A per-day quota or a second consecutive 429 stops the run and saves the checkpoint. "
+        "Any other 4xx stops on that response. "
+        "The cap is cumulative across resumes. "
+        "A key on a billed Google project can still incur charges up to this cap; "
+        "confirm billing is off before starting."
+    )
 
 
 def report_stop(reason: str | None, detail: str, requests: int) -> None:
@@ -885,30 +1187,57 @@ def report_stop(reason: str | None, detail: str, requests: int) -> None:
             f"Stopped: {detail} No further requests will be sent.",
             file=sys.stderr,
         )
-    elif reason in {"network", "quota"} and detail:
+    elif reason in {"network", "quota", "billing", "cost"} and detail:
         print(f"Stopped: {detail}", file=sys.stderr)
 
 
 def stop_exit_code(reason: str | None) -> int | None:
-    if reason == "quota":
+    if reason in {"quota", "billing", "cost"}:
         return 2
     if reason in {"http", "network", "leakage"}:
         return 1
     return None
 
 
+def resolve_runtime(args) -> argparse.Namespace:
+    """Fill provider, model, pace, and key env. A claude-* model selects Anthropic."""
+    provider = args.provider
+    model = args.model or os.environ.get("ORBIT_TEACHER_MODEL") or ""
+    if not model:
+        model = DEFAULT_GEMINI_MODEL if provider == "gemini" else DEFAULT_ANTHROPIC_MODEL
+    if provider is None:
+        provider = "anthropic" if model.lower().startswith("claude") else "gemini"
+    if provider not in {"gemini", "anthropic"}:
+        raise SystemExit("--provider must be gemini or anthropic")
+    per_minute = args.requests_per_minute
+    if per_minute is None:
+        per_minute = ANTHROPIC_REQUESTS_PER_MINUTE if provider == "anthropic" else DEFAULT_REQUESTS_PER_MINUTE
+    key_env = args.api_key_env
+    if not key_env:
+        key_env = "ORBIT_ANTHROPIC_API_KEY" if provider == "anthropic" else "ORBIT_TEACHER_API_KEY"
+    resolved = argparse.Namespace(**vars(args))
+    resolved.provider = provider
+    resolved.model = model
+    resolved.requests_per_minute = per_minute
+    resolved.api_key_env = key_env
+    resolved.max_cost_usd = float(args.max_cost_usd)
+    return resolved
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Distill Orbit trajectories from a Gemini teacher")
-    parser.add_argument("--model", default=os.environ.get("ORBIT_TEACHER_MODEL", DEFAULT_MODEL))
+    parser = argparse.ArgumentParser(description="Distill Orbit trajectories from a Gemini or Claude teacher")
+    parser.add_argument("--provider", choices=("gemini", "anthropic"), default=None)
+    parser.add_argument("--model", default=None)
     parser.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS)
-    parser.add_argument("--requests-per-minute", type=float, default=DEFAULT_REQUESTS_PER_MINUTE)
+    parser.add_argument("--requests-per-minute", type=float, default=None)
+    parser.add_argument("--max-cost-usd", type=float, default=DEFAULT_MAX_COST_USD)
     parser.add_argument("--attempts", type=int, default=DEFAULT_ATTEMPTS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--temperature", type=float, default=0.4)
     parser.add_argument("--max-output-tokens", type=int, default=512)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--api-key-env", default="ORBIT_TEACHER_API_KEY")
+    parser.add_argument("--api-key-env", default=None)
     return parser
 
 
@@ -924,11 +1253,13 @@ def _budget_from_state(state: dict, args, clock=None, sleep=None) -> RequestBudg
 
 
 def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=None) -> dict:
-    args = build_parser().parse_args(argv)
+    args = resolve_runtime(build_parser().parse_args(argv))
     if args.max_requests < 1:
         raise SystemExit("--max-requests must be at least 1")
     if args.requests_per_minute <= 0:
         raise SystemExit("--requests-per-minute must be positive")
+    if args.max_cost_usd < 0:
+        raise SystemExit("--max-cost-usd must be zero or more")
     if args.attempts < 1:
         raise SystemExit("--attempts must be at least 1")
     scratch = Path(tempfile.mkdtemp(prefix="orbit-distill-"))
@@ -938,12 +1269,16 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
         kept, dropped = select_tasks(pool, test_rows)
         if args.dry_run:
             report = dry_report(kept, dropped)
+            report["provider"] = args.provider
+            report["model"] = args.model
+            report["requests_per_minute"] = args.requests_per_minute
+            report["max_cost_usd"] = args.max_cost_usd
             print(json.dumps(report, indent=2))
             return report
         key = os.environ.get(args.api_key_env, "").strip()
         if not key:
             raise SystemExit(
-                f"Set {args.api_key_env} to a Gemini API key. "
+                f"Set {args.api_key_env} to the teacher API key. "
                 "The script never reads a key from disk. --dry-run does not need a key."
             )
         output = args.output
@@ -953,6 +1288,8 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
         budget.prompt_tokens = int(state.get("prompt_tokens") or 0)
         budget.candidates_tokens = int(state.get("candidates_tokens") or 0)
         budget.total_tokens = int(state.get("total_tokens") or 0)
+        budget.estimated_cost_usd = float(state.get("estimated_cost_usd") or 0)
+        budget.price_source = str(state.get("price_source") or "")
         for code, count in (state.get("status_counts") or {}).items():
             budget.status_counts[int(code)] = int(count)
         state["stopped_reason"] = None
@@ -961,33 +1298,39 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
             json.dumps(
                 {
                     "event": "start",
+                    "provider": args.provider,
                     "model": args.model,
                     "max_requests": args.max_requests,
                     "requests_per_minute": args.requests_per_minute,
+                    "max_cost_usd": args.max_cost_usd,
+                    "estimated_cost_usd": budget.estimated_cost_usd,
                     "requests_already_used": budget.used,
                     "attempts_per_task": args.attempts,
                     "n_tasks": len(kept),
-                    "note": (
-                        "A preflight request runs first. HTTP 503 waits 20s, then 40s, then 80s. "
-                        "A per-minute 429 with a stated delay of 120s or less waits once. "
-                        "A per-day quota or a second consecutive 429 stops the run and saves the checkpoint. "
-                        "Any other 4xx stops on that response. "
-                        "The cap is cumulative across resumes. "
-                        "A key on a billed Google project can still incur charges up to this cap; "
-                        "confirm billing is off before starting."
-                    ),
+                    "note": _start_note(args.provider),
                 }
             ),
             flush=True,
         )
-        client = GeminiClient(
-            api_key=key,
-            model=args.model,
-            budget=budget,
-            transport=transport,
-            temperature=args.temperature,
-            max_output_tokens=args.max_output_tokens,
-        )
+        if args.provider == "anthropic":
+            client = AnthropicClient(
+                api_key=key,
+                model=args.model,
+                budget=budget,
+                max_cost_usd=args.max_cost_usd,
+                transport=transport,
+                temperature=args.temperature,
+                max_output_tokens=args.max_output_tokens,
+            )
+        else:
+            client = GeminiClient(
+                api_key=key,
+                model=args.model,
+                budget=budget,
+                transport=transport,
+                temperature=args.temperature,
+                max_output_tokens=args.max_output_tokens,
+            )
 
         def backend_for(_task):
             return TeacherBackend(client)
@@ -1002,6 +1345,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                 workspace=scratch / "runs",
                 state=state,
                 budget=budget,
+                teacher_model=args.model,
             )
         except DistillStop as exc:
             state["stopped_reason"] = exc.reason
@@ -1014,6 +1358,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                 max_requests=args.max_requests,
                 per_minute=args.requests_per_minute,
                 attempts=args.attempts,
+                provider=args.provider,
             )
             stats["n_dropped_leakage"] = len(dropped)
             write_dataset(output, state, stats)
@@ -1029,6 +1374,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
             max_requests=args.max_requests,
             per_minute=args.requests_per_minute,
             attempts=args.attempts,
+            provider=args.provider,
         )
         stats["n_dropped_leakage"] = len(dropped)
         write_dataset(output, state, stats)

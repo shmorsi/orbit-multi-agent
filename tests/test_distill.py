@@ -9,14 +9,24 @@ import pytest
 from distill_teacher import (
     DEFAULT_ATTEMPTS,
     DEFAULT_MAX_REQUESTS,
+    ANTHROPIC_PRICES,
+    ANTHROPIC_REQUESTS_PER_MINUTE,
+    DEFAULT_ANTHROPIC_MODEL,
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_MAX_COST_USD,
     DEFAULT_MODEL,
     DEFAULT_REQUESTS_PER_MINUTE,
+    FALLBACK_PRICE,
+    LONG_CONTEXT_TOKENS,
     HIGH_DEMAND_STATUS,
     MINUTE_QUOTA_MAX_WAIT_SECONDS,
     PREFLIGHT_PROMPT,
     SERVER_ATTEMPTS,
     SERVER_BACKOFF_SECONDS,
+    AnthropicClient,
+    BillingStop,
     BudgetStop,
+    CostStop,
     DistillStop,
     FatalHTTPStop,
     FROZEN_FRAGMENTS,
@@ -25,6 +35,8 @@ from distill_teacher import (
     QuotaStop,
     RequestBudget,
     build_parser,
+    estimate_cost_usd,
+    resolve_runtime,
     load_checkpoint,
     load_pool,
     main,
@@ -51,7 +63,7 @@ def _ok_body(text="{}"):
 def _client(budget, transport, **kwargs):
     params = {
         "api_key": "test-key",
-        "model": DEFAULT_MODEL,
+        "model": DEFAULT_GEMINI_MODEL,
         "budget": budget,
         "transport": transport,
         "log": lambda _event: None,
@@ -207,7 +219,7 @@ def test_http_404_stops_with_the_model_message():
     def transport(url, headers, payload, timeout):
         del headers, payload, timeout
         calls["n"] += 1
-        assert DEFAULT_MODEL in url
+        assert DEFAULT_GEMINI_MODEL in url
         return 404, {"error": {"code": 404, "message": message, "status": "NOT_FOUND"}}
 
     client = _client(_fast_budget(), transport)
@@ -508,7 +520,16 @@ def test_per_day_429_saves_a_checkpoint(monkeypatch, tmp_path):
     output = tmp_path / "out"
     with pytest.raises(SystemExit) as caught:
         main(
-            ["--output", str(output), "--max-requests", "20", "--requests-per-minute", "1000"],
+            [
+                "--provider",
+                "gemini",
+                "--output",
+                str(output),
+                "--max-requests",
+                "20",
+                "--requests-per-minute",
+                "1000",
+            ],
             transport=transport,
             clock=lambda: 0.0,
             sleep=lambda _seconds: None,
@@ -581,14 +602,23 @@ def test_preflight_404_stops_before_any_task(monkeypatch, tmp_path, capsys):
     output = tmp_path / "out"
     with pytest.raises(SystemExit) as caught:
         main(
-            ["--output", str(output), "--max-requests", "20", "--requests-per-minute", "1000"],
+            [
+                "--provider",
+                "gemini",
+                "--output",
+                str(output),
+                "--max-requests",
+                "20",
+                "--requests-per-minute",
+                "1000",
+            ],
             transport=transport,
             clock=lambda: 0.0,
             sleep=lambda _seconds: None,
         )
     assert caught.value.code == 1
     assert len(calls) == 1
-    assert DEFAULT_MODEL in calls[0][0]
+    assert DEFAULT_GEMINI_MODEL in calls[0][0]
     blob = json.dumps(calls[0][1])
     assert PREFLIGHT_PROMPT in blob
     assert task["id"] not in blob
@@ -618,7 +648,16 @@ def test_task_404_after_preflight_does_not_keep_spending(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit) as caught:
         main(
-            ["--output", str(tmp_path / "out"), "--max-requests", "20", "--requests-per-minute", "1000"],
+            [
+                "--provider",
+                "gemini",
+                "--output",
+                str(tmp_path / "out"),
+                "--max-requests",
+                "20",
+                "--requests-per-minute",
+                "1000",
+            ],
             transport=transport,
             clock=lambda: 0.0,
             sleep=lambda _seconds: None,
@@ -740,13 +779,25 @@ def test_dry_run_makes_no_network_call(monkeypatch):
 def test_budget_defaults_match_the_distill_config():
     config = json.loads(Path("finetune/configs/qlora_distill.json").read_text(encoding="utf-8"))
     args = build_parser().parse_args([])
+    runtime = resolve_runtime(args)
     assert config["teacher_max_requests"] == DEFAULT_MAX_REQUESTS == args.max_requests == 800
-    assert config["teacher_requests_per_minute"] == DEFAULT_REQUESTS_PER_MINUTE == args.requests_per_minute == 4
+    assert config["teacher_requests_per_minute"] == DEFAULT_REQUESTS_PER_MINUTE == 4
+    assert runtime.provider == "anthropic"
+    assert runtime.model == DEFAULT_MODEL == DEFAULT_ANTHROPIC_MODEL == "claude-haiku-5-5"
+    assert runtime.requests_per_minute == ANTHROPIC_REQUESTS_PER_MINUTE == 20
+    assert runtime.api_key_env == "ORBIT_ANTHROPIC_API_KEY"
+    assert runtime.max_cost_usd == DEFAULT_MAX_COST_USD == 5
+    assert config["anthropic_model"] == DEFAULT_ANTHROPIC_MODEL
+    assert config["anthropic_requests_per_minute"] == ANTHROPIC_REQUESTS_PER_MINUTE
+    assert config["anthropic_max_cost_usd"] == DEFAULT_MAX_COST_USD
+    assert config["anthropic_long_context_tokens"] == LONG_CONTEXT_TOKENS
+    assert config["anthropic_prices_usd_per_million"] == ANTHROPIC_PRICES
+    assert config["anthropic_fallback_price_usd_per_million"] == FALLBACK_PRICE
     assert config["server_backoff_seconds"] == list(SERVER_BACKOFF_SECONDS) == [20, 40, 80]
     assert config["minute_quota_max_wait_seconds"] == MINUTE_QUOTA_MAX_WAIT_SECONDS == 120
     assert config["high_demand_status"] == HIGH_DEMAND_STATUS == 503
     assert config["teacher_attempts"] == DEFAULT_ATTEMPTS == args.attempts == 3
-    assert config["teacher_model"] == DEFAULT_MODEL == args.model == "gemini-3.8-flash"
+    assert config["teacher_model"] == DEFAULT_GEMINI_MODEL == "gemini-3.8-flash"
     assert config["teacher_model_generation"] == 3.8
     assert config["server_error_attempts"] == SERVER_ATTEMPTS == 3
     assert config["stop_on_http_status"] == 429
@@ -757,3 +808,236 @@ def test_budget_defaults_match_the_distill_config():
     assert "distill" in train_path.parts
     with pytest.raises(SystemExit):
         assert_training_file(Path("eval/test.jsonl"))
+
+
+def _anthropic_body(text="{}", input_tokens=4, output_tokens=2):
+    return {
+        "content": [{"type": "text", "text": text}],
+        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+    }
+
+
+def _anthropic_client(budget, transport, **kwargs):
+    params = {
+        "api_key": "test-key",
+        "model": "claude-haiku-5-5",
+        "budget": budget,
+        "max_cost_usd": 5,
+        "transport": transport,
+        "log": lambda _event: None,
+    }
+    params.update(kwargs)
+    return AnthropicClient(**params)
+
+
+def test_provider_follows_the_model_name():
+    haiku = resolve_runtime(build_parser().parse_args([]))
+    assert haiku.provider == "anthropic"
+    assert haiku.model == "claude-haiku-5-5"
+    sonnet = resolve_runtime(build_parser().parse_args(["--model", "claude-sonnet-5-5"]))
+    assert sonnet.provider == "anthropic"
+    assert sonnet.requests_per_minute == 20
+    gemini = resolve_runtime(build_parser().parse_args(["--model", "gemini-3.8-flash"]))
+    assert gemini.provider == "gemini"
+    assert gemini.requests_per_minute == 4
+    assert gemini.api_key_env == "ORBIT_TEACHER_API_KEY"
+    forced = resolve_runtime(build_parser().parse_args(["--provider", "gemini"]))
+    assert forced.model == "gemini-3.8-flash"
+
+
+def test_cost_table_uses_list_prices_and_a_high_fallback():
+    cost, source = estimate_cost_usd("claude-haiku-5-5", 100_000, 1_000_000)
+    assert source == "table"
+    assert cost == pytest.approx(0.01 + 0.5)
+    long_cost, long_source = estimate_cost_usd("claude-haiku-5-5", LONG_CONTEXT_TOKENS + 1, 1_000_000)
+    assert long_source == "table"
+    assert long_cost == pytest.approx((LONG_CONTEXT_TOKENS + 1) * 0.5 / 1_000_000 + 2.5)
+    dated, dated_source = estimate_cost_usd("claude-haiku-4-5-20251001", 1_000_000, 0)
+    assert dated_source == "table"
+    assert dated == pytest.approx(1.0)
+    assert estimate_cost_usd("claude-sonnet-5-5", 1_000_000, 0)[0] == pytest.approx(2)
+    assert estimate_cost_usd("claude-sonnet-4-6", 1_000_000, 0)[0] == pytest.approx(3)
+    assert estimate_cost_usd("claude-opus-5-5", 1_000_000, 0)[0] == pytest.approx(4)
+    opus, opus_source = estimate_cost_usd("claude-opus-5", 1_000_000, 0)
+    assert opus_source == "table"
+    assert opus == pytest.approx(5)
+    unknown, unknown_source = estimate_cost_usd("claude-fable-9", 1_000_000, 1_000_000)
+    assert unknown_source == "fallback"
+    assert unknown == pytest.approx(15 + 75)
+
+
+def test_anthropic_request_uses_the_messages_api():
+    seen = {}
+
+    def transport(url, headers, payload, timeout):
+        del timeout
+        seen["url"] = url
+        seen["headers"] = headers
+        seen["payload"] = payload
+        return 200, _anthropic_body('{"ok": true}')
+
+    client = _anthropic_client(_fast_budget(), transport)
+    assert client.generate(
+        [
+            {"role": "system", "content": "You are the planner."},
+            {"role": "user", "content": "Task: count the trays."},
+        ]
+    ) == '{"ok": true}'
+    assert seen["url"] == "https://api.anthropic.com/v1/messages"
+    assert "key=" not in seen["url"]
+    assert seen["headers"]["x-api-key"] == "test-key"
+    assert seen["headers"]["anthropic-version"] == "2023-06-01"
+    assert seen["payload"]["system"] == "You are the planner."
+    assert seen["payload"]["messages"] == [{"role": "user", "content": "Task: count the trays."}]
+    assert "systemInstruction" not in seen["payload"]
+
+
+def test_anthropic_429_and_529_back_off_then_continue():
+    for status in (429, 529):
+        calls = {"n": 0}
+        budget, sleeps = _clocked_budget()
+
+        def transport(url, headers, payload, timeout, status=status):
+            del url, headers, payload, timeout
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return status, {"error": {"message": "overloaded"}}
+            return 200, _anthropic_body("{}")
+
+        client = _anthropic_client(budget, transport)
+        assert client.generate([{"role": "user", "content": "Task: one"}]) == "{}"
+        assert calls["n"] == 2
+        assert sleeps == [20]
+        assert budget.used == 2
+
+
+def test_anthropic_client_error_is_not_retried():
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 401, {"error": {"message": "invalid x-api-key"}}
+
+    client = _anthropic_client(_fast_budget(), transport)
+    with pytest.raises(FatalHTTPStop):
+        client.generate([{"role": "user", "content": "Task: one"}])
+    with pytest.raises(FatalHTTPStop):
+        client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == 1
+
+
+def test_low_credit_stops_and_saves_the_checkpoint(monkeypatch, tmp_path):
+    monkeypatch.setenv("ORBIT_ANTHROPIC_API_KEY", "test-key")
+    task = task_by_id("dev-001")
+    monkeypatch.setattr("distill_teacher.load_pool", lambda _workspace: [dict(task)])
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 400, {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "Your credit balance is too low to access the Anthropic API.",
+            },
+        }
+
+    output = tmp_path / "out"
+    with pytest.raises(SystemExit) as caught:
+        main(
+            [
+                "--output",
+                str(output),
+                "--provider",
+                "anthropic",
+                "--max-requests",
+                "20",
+                "--requests-per-minute",
+                "1000",
+            ],
+            transport=transport,
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
+        )
+    assert caught.value.code == 2
+    assert calls["n"] == 1
+    checkpoint = json.loads((output / "checkpoint.json").read_text(encoding="utf-8"))
+    assert checkpoint["stopped_reason"] == "billing"
+    assert checkpoint["requests"] == 1
+    assert checkpoint["tasks"] == {}
+    assert "credit balance is too low" in checkpoint["stopped_detail"]
+    stats = json.loads((output / "stats.json").read_text(encoding="utf-8"))
+    assert stats["teacher_model"] == "claude-haiku-5-5"
+    assert stats["provider"] == "anthropic"
+
+
+def test_cost_limit_stops_before_another_request():
+    calls = {"n": 0}
+    logs = []
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 200, _anthropic_body("{}", input_tokens=200_000, output_tokens=0)
+
+    client = _anthropic_client(
+        _fast_budget(),
+        transport,
+        max_cost_usd=0.1,
+        log=logs.append,
+    )
+    with pytest.raises(CostStop) as caught:
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert "0.1" in str(caught.value)
+    assert calls["n"] == 1
+    with pytest.raises(CostStop):
+        client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == 1
+    request_logs = [row for row in logs if row["event"] == "request"]
+    assert request_logs[-1]["input_tokens"] == 200_000
+    assert request_logs[-1]["output_tokens"] == 0
+    assert request_logs[-1]["estimated_cost_usd"] == pytest.approx(0.1)
+
+
+def test_unknown_model_cost_uses_the_fallback_price():
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 200, _anthropic_body("{}", input_tokens=1_000_000, output_tokens=0)
+
+    client = _anthropic_client(
+        _fast_budget(),
+        transport,
+        model="claude-fable-9",
+        max_cost_usd=15,
+    )
+    with pytest.raises(CostStop):
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert client.budget.price_source == "fallback"
+    assert client.budget.estimated_cost_usd == pytest.approx(15)
+    assert calls["n"] == 1
+
+
+def test_kept_dialog_records_the_teacher_model():
+    class Result:
+        examples = [
+            {
+                "role": "planner",
+                "messages": [
+                    {"role": "user", "content": "Task: count trays."},
+                    {"role": "assistant", "content": "{}"},
+                ],
+            }
+        ]
+
+    rows = rows_from_result(
+        {"id": "dev-001", "expect_refusal": True},
+        Result(),
+        teacher_model="claude-sonnet-5-5",
+    )
+    assert rows[0]["metadata"]["teacher_model"] == "claude-sonnet-5-5"
+    assert rows[0]["messages"][0]["role"] == "user"
