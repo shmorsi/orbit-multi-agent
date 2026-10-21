@@ -22,6 +22,12 @@
     <section class="stage-wrap">
       <p class="eyebrow">Task</p>
       <p id="question" class="question">Loading a saved engine trace.</p>
+      <ol class="phases" id="phases">
+        <li data-phase="planner">01 Planner</li>
+        <li data-phase="worker">02 Worker</li>
+        <li data-phase="tool">03 Tool</li>
+        <li data-phase="critic">04 Critic</li>
+      </ol>
       <div class="stage" id="stage">
         <div class="orbit" aria-hidden="true"><i></i><i></i></div>
         <div class="ring"><span id="mark">Orbit</span></div>
@@ -37,7 +43,10 @@
         <div id="pulse-trail" class="pulse trail"></div>
         <div id="pulse" class="pulse"></div>
         <div id="dock" class="dock">Tool</div>
+        <span class="hud hud-bl"></span>
+        <span class="hud hud-br"></span>
       </div>
+      <pre id="telemetry" class="telemetry">Awaiting uplink</pre>
       <div class="controls">
         <button type="button" id="play" aria-pressed="false">Play</button>
         <button type="button" id="pause">Pause</button>
@@ -86,6 +95,40 @@
       <div id="rules" class="rules"></div>
     </aside>
   </main>
+  <section class="board" id="board">
+    <div class="board-head">
+      <p class="eyebrow">Flight data</p>
+      <h2>Frozen test, team-eval-v1</h2>
+      <p class="honesty">Task-success intervals include zero. The 1.5B adapter is not a statistically significant task-success gain. Team LoRA lost one of two trap refusals. Team distill has not been scored.</p>
+    </div>
+    <div class="score-row" id="score-row"></div>
+    <div class="chart-grid">
+      <figure>
+        <figcaption>Task success, with a 95% bootstrap interval</figcaption>
+        <canvas id="success-chart" data-height="250" aria-label="Task success bar chart"></canvas>
+      </figure>
+      <figure>
+        <figcaption>Schema-valid rate, with a 95% bootstrap interval</figcaption>
+        <canvas id="schema-chart" data-height="250" aria-label="Schema-valid rate bar chart"></canvas>
+      </figure>
+      <figure>
+        <figcaption>QLoRA training loss</figcaption>
+        <canvas id="loss-chart" data-height="250" aria-label="Training loss curve"></canvas>
+      </figure>
+    </div>
+    <div class="lower-grid">
+      <figure>
+        <figcaption>Paired difference, Team LoRA minus team base. The red line is zero. Distill is not scored.</figcaption>
+        <canvas id="paired-chart" data-height="210" aria-label="Paired bootstrap intervals"></canvas>
+      </figure>
+      <div class="trap-panel">
+        <h3>Trap refusals</h3>
+        <div id="traps" class="traps"></div>
+      </div>
+    </div>
+  </section>
+  <script src="board.js"></script>
   <script src="replay.js"></script>
+  <script src="charts.js"></script>
 </body>
 </html>
