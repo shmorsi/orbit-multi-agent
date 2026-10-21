@@ -8,11 +8,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from orbit_agents.prompts import CRITIC_SYSTEM, PLANNER_SYSTEM, SINGLE_SYSTEM, WORKER_SYSTEM
-from orbit_agents.schema import check_role, dumps
+from orbit_agents.schema import check_role, dumps, normalize_payload
 from orbit_agents.tools import call_tool
 
 NUMBER_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d.])")
+ANSWER_NUMBER_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d])")
 REPAIR = "The previous reply was not valid for this role. Reply with one JSON object and nothing else."
+
+
+def repair_message(error: str) -> str:
+    """Tell the model which check failed. A generic retry left the 0.5B run at zero valid tool calls."""
+    detail = " ".join(str(error).split()) or "invalid JSON"
+    if len(detail) > 180:
+        detail = detail[:180] + "..."
+    return (
+        "The previous reply was not valid for this role. "
+        f"Validator says: {detail} "
+        "Reply with one JSON object and nothing else."
+    )
 UNGROUNDED = "The claims were not in the cited tool results."
 STOPPED = "Stopped at the step limit before a grounded answer."
 MAX_TURNS = 8
@@ -41,18 +54,40 @@ def extract_json(raw: str) -> dict:
     start = raw.find("{")
     if start < 0:
         raise ValueError("no JSON object")
-    payload, _end = json.JSONDecoder().raw_decode(raw[start:])
+    decoder = json.JSONDecoder()
+    try:
+        payload, _end = decoder.raw_decode(raw[start:])
+    except json.JSONDecodeError:
+        cleaned = re.sub(r",(\s*[}\]])", r"\1", raw[start:])
+        payload, _end = decoder.raw_decode(cleaned)
     if not isinstance(payload, dict):
         raise ValueError("JSON value is not an object")
     return payload
 
 
 def contains_number(text: str, value: int) -> bool:
-    return re.search(rf"(?<![\d.]){int(value)}(?![\d.])", text) is not None
+    number = int(value)
+    if re.search(rf"(?<![\d.]){number}(?![\d.])", text):
+        return True
+    return re.search(rf"(?<![\d.]){number}\.0+(?!\d)", text) is not None
+
+
+def _number_token(token: str) -> str:
+    if re.fullmatch(r"\d+\.0+", token):
+        return str(int(float(token)))
+    return token
 
 
 def result_text(result: dict) -> str:
     return json.dumps(result, ensure_ascii=True)
+
+
+def _text_in_blob(text: str, blob: str) -> bool:
+    if text in blob:
+        return True
+    folded = re.sub(r"\s+", " ", text).strip()
+    haystack = re.sub(r"\s+", " ", blob)
+    return bool(folded) and folded in haystack
 
 
 def claims_are_grounded(question: str, claims: list, results: list, answer: str) -> bool:
@@ -66,12 +101,12 @@ def claims_are_grounded(question: str, claims: list, results: list, answer: str)
         blob = result_text(results[index]["result"])
         if "value" in claim and not contains_number(blob, int(claim["value"])):
             return False
-        if "text" in claim and claim["text"] not in blob:
+        if "text" in claim and not _text_in_blob(claim["text"], blob):
             return False
-    allowed = set(NUMBER_RE.findall(question))
+    allowed = {_number_token(token) for token in NUMBER_RE.findall(question)}
     for item in results:
-        allowed.update(NUMBER_RE.findall(result_text(item["result"])))
-    return all(token in allowed for token in NUMBER_RE.findall(answer))
+        allowed.update(_number_token(token) for token in NUMBER_RE.findall(result_text(item["result"])))
+    return all(_number_token(token) in allowed for token in ANSWER_NUMBER_RE.findall(answer))
 
 
 def _clip(text: str, limit: int = 1000) -> str:
@@ -138,7 +173,7 @@ class TeamRun:
             raw = self.backend.complete(role=role, messages=prompt)
             self._event(role, "message", step=self.n_steps, content=raw)
             try:
-                payload = extract_json(raw)
+                payload = normalize_payload(role, extract_json(raw))
                 error = check_role(role, payload)
             except ValueError as exc:
                 payload = None
@@ -146,7 +181,7 @@ class TeamRun:
             if error is None and payload is not None:
                 self.schema_valid += 1
                 canonical = dumps(payload)
-                if role in {"planner", "worker"}:
+                if role in {"planner", "worker", "critic"}:
                     self.examples.append({"role": role, "messages": prompt + [{"role": "assistant", "content": canonical}]})
                 self._event(role, "parsed", payload=payload)
                 return payload
@@ -154,7 +189,7 @@ class TeamRun:
             self._event(role, "invalid", error=error or "invalid")
             prompt = prompt + [
                 {"role": "assistant", "content": raw},
-                {"role": "user", "content": REPAIR},
+                {"role": "user", "content": repair_message(error or "invalid")},
             ]
         return None
 

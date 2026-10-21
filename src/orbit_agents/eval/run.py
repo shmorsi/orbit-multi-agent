@@ -15,8 +15,16 @@ from orbit_agents.tasks import read_jsonl
 
 SPLITS = {
     "dev": ROOT / "eval" / "dev.jsonl",
+    "tune": ROOT / "eval" / "dev.jsonl",
     "test": ROOT / "eval" / "test.jsonl",
 }
+
+
+def load_tasks(split: str) -> list[dict]:
+    rows = read_jsonl(SPLITS[split])
+    if split == "tune":
+        return [task for task in rows if task.get("subset") == "tune"]
+    return rows
 
 
 def load_backend(name: str, task: dict, model: str, adapter: str | None, max_new_tokens: int):
@@ -52,7 +60,7 @@ def execute(tasks: list[dict], *, mode: str, backend_name: str, model: str, adap
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Score Orbit on a frozen split")
-    parser.add_argument("--split", choices=sorted(SPLITS), default="test")
+    parser.add_argument("--split", choices=("dev", "tune", "test"), default="test")
     parser.add_argument("--mode", choices=["team", "single"], default="team")
     parser.add_argument("--backend", choices=["scripted", "transformers", "ollama", "llamacpp"], default="scripted")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
@@ -60,7 +68,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
-    tasks = read_jsonl(SPLITS[args.split])
+    tasks = load_tasks(args.split)
     kind = "system_check" if args.backend == "scripted" else "model_eval"
     rows = execute(
         tasks,

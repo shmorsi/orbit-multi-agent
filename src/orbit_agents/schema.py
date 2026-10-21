@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import jsonschema
 
@@ -115,6 +116,78 @@ ROLE_SCHEMAS = {"planner": PLANNER_SCHEMA, "worker": WORKER_SCHEMA, "critic": CR
 
 def validate(schema: dict, payload: dict) -> None:
     jsonschema.validate(payload, schema)
+
+
+def _known(payload: dict, allowed: set[str]) -> dict:
+    return {key: value for key, value in payload.items() if key in allowed}
+
+
+def coerce_int(value):
+    """Whole numbers written as 5.0 or \"5\" are the integer 5. Booleans are not numbers."""
+    if isinstance(value, bool) or isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
+        return int(value.strip())
+    return value
+
+
+def normalize_citation(value):
+    if not isinstance(value, str):
+        return value
+    match = re.fullmatch(r"(?i)call[\s_-]*([1-9]\d*)", value.strip())
+    if match:
+        return f"call_{int(match.group(1))}"
+    return value
+
+
+def normalize_payload(role: str, payload: dict) -> dict:
+    """Drop unknown keys and coerce claim spellings. Required fields are still validated later."""
+    if not isinstance(payload, dict):
+        return payload
+    if role == "planner":
+        raw_steps = payload.get("steps")
+        if not isinstance(raw_steps, list):
+            return _known(payload, {"steps"})
+        steps = []
+        for step in raw_steps:
+            if not isinstance(step, dict):
+                steps.append(step)
+                continue
+            cleaned = _known(step, {"goal", "tool"})
+            tool = cleaned.get("tool")
+            if isinstance(tool, str):
+                cleaned["tool"] = tool.strip().lower()
+            steps.append(cleaned)
+        return {"steps": steps}
+    if role == "critic":
+        return _known(payload, {"verdict", "reason"})
+    if role != "worker":
+        return payload
+    cleaned = _known(payload, {"action", "tool", "arguments", "status", "answer", "claims"})
+    tool_name = cleaned.get("tool")
+    if isinstance(tool_name, str):
+        cleaned["tool"] = tool_name.strip().lower()
+    arguments = cleaned.get("arguments")
+    known_tool = cleaned.get("tool")
+    if isinstance(arguments, dict) and known_tool in TOOL_SCHEMAS:
+        allowed = set(TOOL_SCHEMAS[known_tool]["properties"])
+        cleaned["arguments"] = _known(arguments, allowed)
+    claims = []
+    for claim in cleaned.get("claims") or []:
+        if not isinstance(claim, dict):
+            claims.append(claim)
+            continue
+        item = _known(claim, {"name", "value", "text", "unit", "citation"})
+        if "value" in item:
+            item["value"] = coerce_int(item["value"])
+        if "citation" in item:
+            item["citation"] = normalize_citation(item["citation"])
+        claims.append(item)
+    if "claims" in cleaned:
+        cleaned["claims"] = claims
+    return cleaned
 
 
 def check_worker(payload: dict) -> str | None:

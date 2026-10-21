@@ -1,12 +1,14 @@
 {
-  "built_from": "eval/dev.jsonl only",
+  "built_from": "eval/dev.jsonl and corpus tool scenarios; eval/test.jsonl was not read",
   "test_file_read": false,
-  "n_train_dialogs": 68,
-  "n_tune_dialogs": 23,
-  "n_train_tasks": 16,
-  "n_tune_tasks": 8,
+  "n_train_dialogs": 307,
+  "n_tune_dialogs": 71,
+  "n_train_tasks": 69,
+  "n_tune_tasks": 18,
   "roles": [
+    "critic",
     "planner",
     "worker"
-  ]
+  ],
+  "near_duplicate_ratio": 0.9
 }

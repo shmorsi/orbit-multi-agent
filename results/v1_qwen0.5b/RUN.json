@@ -1,0 +1,11 @@
+{
+  "status": "trained",
+  "kind": "adapter_only",
+  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "method": "qlora",
+  "n_train_dialogs": 68,
+  "n_tune_dialogs": 23,
+  "loss_curve_written": true,
+  "task_metrics": null,
+  "note": "An adapter was saved. This is not a task-success result. Score the frozen test once, separately."
+}

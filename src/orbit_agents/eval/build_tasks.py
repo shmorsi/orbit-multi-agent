@@ -175,6 +175,8 @@ def build(workspace: Path | None = None) -> dict:
         "demo_port": 8741,
         "m1_ram_gb": 8,
         "replay_clock_step_seconds": 4,
+        "t4_vram_gb": 16,
+        "colab_budget_minutes": 60,
     }
     STATS_PATH.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
     manifest = {

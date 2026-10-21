@@ -12,7 +12,9 @@ WORKER_SYSTEM = (
     "To finish: {\"action\": \"final\", \"status\": \"answer\"|\"refuse\", \"answer\": \"...\", \"claims\": ["
     "{\"name\": \"...\", \"value\": 0, \"unit\": \"count\", \"citation\": \"call_1\"}]}. "
     "A text claim uses \"text\" instead of \"value\". Cite the tool result that contains the claim. "
-    "Refuse, with an empty claims list, when the tools cannot support an answer. Do not invent figures."
+    "Refuse, with an empty claims list, when the tools cannot support an answer. Do not invent figures. "
+    "Arguments: calculator uses expression; read_file uses path; write_file uses path and content; "
+    "python uses code; retrieve uses query; web_search uses query."
 )
 
 CRITIC_SYSTEM = (
@@ -27,7 +29,9 @@ SINGLE_SYSTEM = (
     "Reply with one JSON object, either a tool call "
     "{\"action\": \"tool\", \"tool\": \"<name>\", \"arguments\": { ... }} "
     "or a final {\"action\": \"final\", \"status\": \"answer\"|\"refuse\", \"answer\": \"...\", \"claims\": [...]}. "
-    "Every number in an answer must come from a tool result or the question. Refuse when the corpus cannot answer."
+    "Every number in an answer must come from a tool result or the question. Refuse when the corpus cannot answer. "
+    "Arguments: calculator uses expression; read_file uses path; write_file uses path and content; "
+    "python uses code; retrieve uses query; web_search uses query."
 )
 
 

@@ -8,7 +8,7 @@ Mission Control replays the JSONL trace from the engine, including a task you st
 
 ## Try it yourself
 
-Python 3.11 or newer. The demo target is an 8 GB machine with the 0.5B model. The 1.5B model is optional and tight on that machine. QLoRA and bitsandbytes are CUDA-only. `make setup` does not install them, and the demo never imports them. A saved adapter, if you have one, is merged in half precision on MPS or CUDA and in full precision on CPU.
+Python 3.11 or newer. The demo target is an 8 GB machine with the 0.5B model. The 1.5B model is slow on that machine but can run in fp16; for a quicker loop stay on the 0.5B model or use Ollama on localhost. QLoRA and bitsandbytes are CUDA-only. `make setup` does not install them, and the demo never imports them. On MPS or CPU a saved adapter is merged in half precision or full precision. On CUDA, evaluation loads the base in 4-bit and attaches the adapter.
 
 `make doctor` prints seconds for the scripted harness on the machine you run it on. `make doctor-live` downloads Qwen2.5-0.5B-Instruct and prints seconds for one real task. This page does not publish those readings.
 
@@ -58,7 +58,7 @@ The scripted harness finishes a bundled task quickly enough that the doctor prin
 Troubleshooting:
 
 - `torch is not installed` means `make setup` has not been run. QLoRA is still not required.
-- `mps` missing on an M1 means the demo is on CPU. Close other apps before trying the 1.5B model.
+- `mps` missing on an M1 means the demo is on CPU. The 1.5B model is slow there; use the 0.5B model or Ollama if you want a shorter wait.
 - A free-form question with the scripted harness returns an error. That backend only runs a bundled task id. Choose Transformers, Ollama, or llama.cpp for your own wording.
 - GitHub Pages can host the `mission` directory and will replay the saved traces. The run form needs the local server.
 - Out of memory: stay on the 0.5B default. Do not install bitsandbytes on a Mac to “make QLoRA work”; that stack is the Colab path below.
@@ -102,31 +102,35 @@ Record the clip again with `python demo/record_replay.py`. It needs Chrome and f
 
 ## Fine-tune
 
-Dialogues come from the dev split only. `finetune/leakage.py` rejects a test id, a test question, or a test tool snippet in those files. `finetune/train.py --dry-run` prints counts and does not claim a task score.
+Dialogues are built from the dev split and from the corpus tools: 307 train dialogues and 71 tune dialogues, covering the planner, the worker, and the critic. `finetune/leakage.py` rejects a test id, a test question, a near-duplicate question at ratio 0.9, a test answer string, or a test tool snippet. `finetune/train.py --dry-run` prints counts and does not claim a task score. Task iteration is `python -m orbit_agents.eval.run --split tune`. That split was not scored with a model here. This machine has no CUDA GPU, and the 1.5B model was not downloaded, so there is no tune-split number and no new frozen-test number in this change.
+
+The Colab default is `finetune/configs/qlora_medium.json` (Qwen2.5-1.5B-Instruct, QLoRA). It targets a free T4 with 16 GB and about 60 minutes for training plus the three evals. That wall clock has not been measured here. `finetune/configs/qlora_small.json` is the 0.5B config used for the measured v1 run. `--method lora` is the MPS or CPU training path. On an M1, prefer that 0.5B config or Ollama; the 1.5B weights are slow but can run in fp16.
 
 On a free T4, open `finetune/colab_train.ipynb` and run it from the top.
 
-- Upload the project zip to `/content/orbit.zip` to train that copy. The setup cells unzip it into `/content/orbit` and check that the config is the 0.5B QLoRA file.
-- With no zip, those cells clone https://github.com/shmorsi/orbit-multi-agent. Set `REPO_URL` to clone a different remote instead.
-- Install `finetune/requirements-colab.txt` with `--upgrade-strategy only-if-needed`, then `pip install -e . --no-deps`, and run the leakage check. Do not reinstall torch.
-- Train with `finetune/configs/qlora_small.json`.
-- Display the loss curve the trainer wrote.
-- Score the frozen test once: single base, team base, team plus the adapter. Then compare those three files.
-- Zip the adapter, the loss curve, `RUN.json`, and the result files to `/content/outputs.zip` and download it.
+- Optional: set `ORBIT_MOUNT_DRIVE=1` before the first code cell to mount Drive. Otherwise checkpoints stay on the runtime disk under `/content/orbit-checkpoints`. Set `ORBIT_SAVE_DIR` to copy somewhere else as well.
+- Upload the project zip to `/content/orbit.zip` to train that copy. With no zip, the notebook clones https://github.com/shmorsi/orbit-multi-agent. Set `REPO_URL` to clone a different remote instead.
+- The install cell uninstalls torchao (the preinstalled build breaks `PeftModel.from_pretrained`), installs `finetune/requirements-colab.txt` with `--upgrade-strategy only-if-needed`, then `pip install -e . --no-deps`, and runs the leakage check in a subprocess. Do not reinstall torch. Pip output is not hidden.
+- Train with `finetune/configs/qlora_medium.json`. The notebook copies the adapter, the loss curve, and `RUN.json` as soon as training returns.
+- Score the frozen test once, and copy each file before the next command: single base, team base, team plus the adapter, then the comparison. CUDA loads the 1.5B base in 4-bit and attaches the adapter.
+- Zip those files to `/content/outputs.zip` and download it.
 
-Do not score the frozen test in a loop. `--method lora` is the MPS or CPU training path when you are not on the T4. The notebook does not use the 1.5B config.
+Do not score the frozen test in a loop. A new model gets one frozen score. Iterate on the tune split, which this notebook does not run.
 
 <!-- RESULTS_START -->
-| Run | State |
-| --- | --- |
-| Single base model | pending run |
-| Team, base model | pending run |
-| Team plus adapter | pending run |
-| Paired comparison | pending run |
+Measured once on the frozen test `team-eval-v1`, Qwen2.5-0.5B, QLoRA, 68 train dialogues and 23 tune dialogues. Files: `results/v1_qwen0.5b/`. Logged loss went from 1.3191939353942872 to 0.20024461746215821. This is the baseline. It is not a task-success win.
 
-No language-model score has been measured. The metrics fields are null. A harness file in `results/` is a system check of the scripted tools, not a model score.
+| Run | Successes | Schema-valid rate |
+| --- | --- | --- |
+| Single base | 2 of 12 | 0.0 |
+| Team base | 2 of 12 | 0.07083333333333335 |
+| Team plus adapter | 1 of 12 | 0.6131944444444445 |
+
+The single-base rows have schema_valid 0 and n_tool_calls 0. The successes are the trap tasks (`n_correct_refusals` 2, then 2, then 1). No other task succeeded. The paired bootstrap interval for schema-valid rate, adapter minus team base, is 0.36388888888888893 to 0.7229166666666668 (point 0.5423611111111112). The same pair's task-success interval has high 0.0, so task success did not improve. Fine-tuning taught the format.
+
+Single base, team base, team plus adapter, and the paired comparison for the new config are a pending run. The top-level files in `results/` stay pending until that one frozen score is written. A harness file in `results/` is a system check of the scripted tools, not a model score.
 <!-- RESULTS_END -->
 
 ## What I built
 
-The team loop, the six tools, the frozen split, the leakage check, the optional LoRA trainer, and Mission Control. I did not run QLoRA or the three model evals here, so the table above stays a pending run until those commands write measured files.
+The team loop, the six tools, the frozen split, the leakage check, the optional LoRA trainer, and Mission Control. The v1 QLoRA run above is the only measured model score. The 1.5B config, the larger dialogue set, and the harness repairs are in this tree, and they have not been scored on the frozen test.
