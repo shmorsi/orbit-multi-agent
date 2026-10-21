@@ -39,6 +39,7 @@
   },
   "anthropic_fallback_price_usd_per_million": {"input": 15.0, "output": 75.0},
   "teacher_max_requests": 800,
+  "teacher_max_total_requests": null,
   "teacher_requests_per_minute": 4,
   "teacher_attempts": 3,
   "server_error_attempts": 3,
