@@ -74,17 +74,56 @@ def map_training_kwargs(raw: dict, parameters: set[str]) -> dict:
     return {key: value for key, value in kwargs.items() if key in parameters}
 
 
+def chat_text(tokenizer, messages: list[dict]) -> str:
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+
+
+def seq_length_error(lengths: list[int], max_length: int) -> str | None:
+    """Error when max_seq_length would cut the assistant turn off the dialog."""
+    over = [length for length in lengths if length > max_length]
+    if not over:
+        return None
+    longest = max(lengths)
+    return (
+        f"{len(over)} of {len(lengths)} dialogs exceed max_seq_length {max_length} "
+        f"(longest {longest}). "
+        "Truncation cuts the assistant turn and the assistant mask is empty. "
+        f"Raise max_seq_length to at least {longest}."
+    )
+
+
+def guard_seq_length(tokenizer, rows: list[dict], max_length: int) -> None:
+    """Refuse a max_seq_length shorter than the dialogs about to be trained.
+
+    Distill rows carry the role system prompt plus the checker contract. With
+    the Qwen2.5 tokenizer those dialogs are about 951 tokens at the median and
+    about 1,400 at the max, so 768 leaves the assistant mask empty.
+    """
+    lengths = []
+    for row in rows:
+        encoded = tokenizer(chat_text(tokenizer, row["messages"]), add_special_tokens=False)
+        lengths.append(len(encoded["input_ids"]))
+    error = seq_length_error(lengths, max_length)
+    if error:
+        raise SystemExit(error)
+
+
 def mask_assistant_tokens(tokenizer, messages: list[dict], max_length: int) -> dict:
-    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    text = chat_text(tokenizer, messages)
     encoding = tokenizer(
         text,
-        truncation=True,
-        max_length=max_length,
         add_special_tokens=False,
         return_offsets_mapping=True,
     )
     if "offset_mapping" not in encoding:
         raise RuntimeError("tokenizer did not return offsets; refusing to train on user tokens")
+    n_tokens = len(encoding["input_ids"])
+    if n_tokens > max_length:
+        raise RuntimeError(
+            f"assistant mask is empty: dialog is {n_tokens} tokens and max_seq_length is {max_length}. "
+            "Truncation cuts the assistant turn. "
+            f"Raise max_seq_length to at least {n_tokens}."
+        )
     start_marker = "<|im_start|>assistant\n"
     end_marker = "<|im_end|>"
     spans = []
@@ -167,6 +206,8 @@ def train(config: dict, output_dir: Path) -> None:
     tokenizer = AutoTokenizer.from_pretrained(config["base_model"])
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    max_length = int(config["max_seq_length"])
+    guard_seq_length(tokenizer, train_rows + tune_rows, max_length)
 
     if method == "qlora":
         from transformers import BitsAndBytesConfig
@@ -205,7 +246,6 @@ def train(config: dict, output_dir: Path) -> None:
             target_modules=config["target_modules"],
         ),
     )
-    max_length = int(config["max_seq_length"])
     train_dataset = [mask_assistant_tokens(tokenizer, row["messages"], max_length) for row in train_rows]
     tune_dataset = [mask_assistant_tokens(tokenizer, row["messages"], max_length) for row in tune_rows]
     output_dir.mkdir(parents=True, exist_ok=True)
