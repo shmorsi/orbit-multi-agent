@@ -40,7 +40,9 @@ def test_readme_numbers_come_from_committed_files():
     results_text = results_match.group(1)
     outside = RESULTS_RE.sub(" ", readme)
     result_numbers = set()
-    for path in Path("results").glob("*.json"):
+    result_files = list(Path("results").glob("*.json"))
+    result_files.extend(Path("results/v1_qwen0.5b").glob("*.json"))
+    for path in result_files:
         result_numbers |= _json_numbers(path)
     allowed_outside = set(result_numbers)
     for path in (

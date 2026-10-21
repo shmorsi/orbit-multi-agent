@@ -55,6 +55,39 @@ def test_compare_refuses_a_harness_file():
         )
 
 
+def test_tune_split_scores_only_the_dev_tune_tasks(tmp_path):
+    out = tmp_path / "tune.json"
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-m",
+            "orbit_agents.eval.run",
+            "--split",
+            "tune",
+            "--mode",
+            "team",
+            "--backend",
+            "scripted",
+            "--out",
+            str(out),
+        ]
+    )
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["split"] == "tune"
+    assert report["kind"] == "system_check"
+    assert [row["id"] for row in report["per_task"]] == [
+        "dev-017",
+        "dev-018",
+        "dev-019",
+        "dev-020",
+        "dev-021",
+        "dev-022",
+        "dev-023",
+        "dev-024",
+    ]
+    assert all(row["success"] for row in report["per_task"])
+
+
 def test_model_files_are_pending():
     for name in ("single_base.json", "team_base.json", "team_lora.json", "comparison.json", "finetune_eval.json"):
         payload = json.loads(Path("results", name).read_text(encoding="utf-8"))

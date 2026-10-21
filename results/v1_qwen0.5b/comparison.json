@@ -1,0 +1,104 @@
+{
+  "status": "measured",
+  "kind": "comparison",
+  "n_resamples": 10000,
+  "seed": 0,
+  "pairs": {
+    "team_base_minus_single_base": {
+      "task_success_rate": {
+        "point": 0.0,
+        "low": 0.0,
+        "high": 0.0,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": 2.5833333333333335,
+        "low": 2.1666666666666665,
+        "high": 2.9166666666666665,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": 0.07083333333333335,
+        "low": 0.016666666666666666,
+        "high": 0.12916666666666668,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    },
+    "team_lora_minus_team_base": {
+      "task_success_rate": {
+        "point": -0.08333333333333333,
+        "low": -0.25,
+        "high": 0.0,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": -0.25,
+        "low": -1.0,
+        "high": 0.6666666666666666,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": 0.5423611111111112,
+        "low": 0.36388888888888893,
+        "high": 0.7229166666666668,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    },
+    "team_lora_minus_single_base": {
+      "task_success_rate": {
+        "point": -0.08333333333333333,
+        "low": -0.25,
+        "high": 0.0,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": 2.3333333333333335,
+        "low": 1.6666666666666667,
+        "high": 3.0833333333333335,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": 0.6131944444444445,
+        "low": 0.4222222222222222,
+        "high": 0.7999999999999999,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    }
+  }
+}

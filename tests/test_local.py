@@ -3,9 +3,29 @@ import threading
 import urllib.request
 from pathlib import Path
 
-from orbit_agents.backends import LlamaCppBackend, OllamaBackend, inference_dtype, pick_device
+from orbit_agents.backends import (
+    LlamaCppBackend,
+    OllamaBackend,
+    eval_loads_in_4bit,
+    inference_dtype,
+    pick_device,
+    torchao_is_compatible,
+)
 from orbit_agents.doctor import main as doctor_main
 from orbit_agents.serve import bind
+
+
+def test_cuda_eval_stays_4bit_and_other_devices_do_not():
+    assert eval_loads_in_4bit("cuda") is True
+    assert eval_loads_in_4bit("mps") is False
+    assert eval_loads_in_4bit("cpu") is False
+
+
+def test_old_torchao_is_rejected():
+    assert torchao_is_compatible(None) is True
+    assert torchao_is_compatible("0.10.0") is False
+    assert torchao_is_compatible("0.16.0") is False
+    assert torchao_is_compatible("0.16.1") is True
 
 
 def test_pick_device_prefers_mps_then_cpu():
