@@ -7,19 +7,22 @@ as training rows. Tool calls run through Orbit's sandbox.
 Cost controls, all on by default:
 
 - hard cap on API requests (800)
-- about 8 requests per minute
+- about 4 requests per minute
 - resume from a checkpoint, and the cap counts requests already spent
 - one preflight request, then the task loop
-- HTTP 429 and quota errors stop the process and are not retried
+- HTTP 503 waits 20s, then 40s, then 80s; each retry counts toward the cap
+- a per-minute HTTP 429 with a stated delay of 120s or less waits once and continues
+- a per-day quota, a longer delay, or a second consecutive 429 stops and saves the checkpoint
 - any other 4xx (400, 401, 403, 404, and the rest) stops the process immediately
-- a 5xx response is retried a few times, then the process stops
+- another 5xx is retried a few times, then the process stops
+- Gemma model names send the system text in the first user turn
 
 The key is read from ORBIT_TEACHER_API_KEY. This script does not call the API
 during --dry-run.
 
     python finetune/distill_teacher.py --dry-run
     ORBIT_TEACHER_API_KEY=... python finetune/distill_teacher.py \\
-        --max-requests 800 --requests-per-minute 8 --attempts 3 \\
+        --max-requests 800 --requests-per-minute 4 --attempts 3 \\
         --output finetune/data/distill
 """
 
@@ -29,6 +32,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -61,10 +65,15 @@ DEV_PATH = ROOT / "eval" / "dev.jsonl"
 DEFAULT_OUTPUT = ROOT / "finetune" / "data" / "distill"
 DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_MAX_REQUESTS = 800
-DEFAULT_REQUESTS_PER_MINUTE = 8.0
+DEFAULT_REQUESTS_PER_MINUTE = 4.0
 DEFAULT_ATTEMPTS = 3
 SERVER_ATTEMPTS = 3
+SERVER_BACKOFF_SECONDS = (20, 40, 80)
+HIGH_DEMAND_STATUS = 503
+MINUTE_QUOTA_MAX_WAIT_SECONDS = 120
 PREFLIGHT_PROMPT = "Reply with an empty JSON object."
+_RETRY_IN_RE = re.compile(r"retry in\s+([0-9]+(?:\.[0-9]+)?)\s*s\b", re.IGNORECASE)
+_DELAY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)s$", re.IGNORECASE)
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 CHECKPOINT_VERSION = 1
 
@@ -131,6 +140,10 @@ class RequestBudget:
         self.total_tokens = 0
         self.stop_reason: str | None = None
         self.stop_detail = ""
+        self.status_counts: dict[int, int] = defaultdict(int)
+        self.started_at: float | None = None
+        self.session_used = 0
+        self.consecutive_429 = 0
 
     def acquire(self) -> None:
         if self.stop_reason == "quota":
@@ -149,7 +162,24 @@ class RequestBudget:
                 self.sleep(wait)
                 now = float(self.clock())
         self.last_request_at = now
+        if self.started_at is None:
+            self.started_at = now
         self.used += 1
+        self.session_used += 1
+
+    def note_status(self, status: int) -> None:
+        self.status_counts[int(status)] = self.status_counts.get(int(status), 0) + 1
+
+    def effective_per_minute(self) -> float | None:
+        if self.started_at is None or self.session_used <= 0:
+            return None
+        elapsed = float(self.clock()) - self.started_at
+        if elapsed <= 0:
+            return None
+        return self.session_used / (elapsed / 60.0)
+
+    def status_count_map(self) -> dict[str, int]:
+        return {str(code): self.status_counts[code] for code in sorted(self.status_counts)}
 
     def add_usage(self, prompt: int, candidates: int, total: int) -> None:
         self.prompt_tokens += int(prompt)
@@ -400,6 +430,7 @@ def sync_budget(state: dict, budget: RequestBudget | None) -> None:
     state["candidates_tokens"] = budget.candidates_tokens
     state["total_tokens"] = budget.total_tokens
     state["last_request_at"] = budget.last_request_at
+    state["status_counts"] = budget.status_count_map()
 
 
 def run_distill(
@@ -494,6 +525,7 @@ def build_stats(state: dict, pool: list[dict], *, model: str, max_requests: int,
         "prompt_tokens": state["prompt_tokens"],
         "candidates_tokens": state["candidates_tokens"],
         "total_tokens": state["total_tokens"],
+        "status_counts": state.get("status_counts") or {},
         "stopped_reason": state.get("stopped_reason"),
         "stopped_detail": state.get("stopped_detail") or "",
         "attempts": state["attempts"],
@@ -559,12 +591,46 @@ def _text_from_body(body: dict) -> str:
 
 
 def is_quota(status: int, body: dict) -> bool:
-    if status == 429:
-        return True
-    if status not in {400, 403, 503}:
+    """A quota-shaped body on 400 or 403. 429 and 503 are handled on their own."""
+    if status not in {400, 403}:
         return False
     text = json.dumps(body).lower()
     return "resource_exhausted" in text or "quota" in text
+
+
+def _parse_delay(text: str) -> float | None:
+    match = _DELAY_RE.match(text.strip())
+    if not match:
+        return None
+    return float(match.group(1))
+
+
+def minute_quota_wait(body: dict) -> float | None:
+    """Seconds to wait for one per-minute 429. None means stop instead of waiting.
+
+    A per-day quota, a missing delay, and a delay above the pause limit all return None.
+    """
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        error = {}
+    text = json.dumps(body).lower()
+    if "per day" in text or "daily" in text:
+        return None
+    delay = None
+    for item in error.get("details") or []:
+        if isinstance(item, dict) and item.get("retryDelay"):
+            delay = _parse_delay(str(item["retryDelay"]))
+            if delay is not None:
+                break
+    if delay is None:
+        match = _RETRY_IN_RE.search(str(error.get("message") or ""))
+        if match:
+            delay = float(match.group(1))
+    if delay is None or delay <= 0 or delay > MINUTE_QUOTA_MAX_WAIT_SECONDS:
+        return None
+    if "per minute" not in text and "retry in" not in text and "retrydelay" not in text:
+        return None
+    return delay
 
 
 def http_detail(status: int, body: dict, model: str) -> str:
@@ -613,6 +679,21 @@ def to_gemini(messages: list[dict]) -> tuple[str, list[dict]]:
     return "\n\n".join(systems), contents
 
 
+def model_folds_system(model: str) -> bool:
+    """Gemma rejects systemInstruction on this API. Gemini keeps that field."""
+    return model.lower().startswith("gemma")
+
+
+def _fold_system(payload: dict, system: str) -> None:
+    contents = payload.get("contents") or []
+    if not contents:
+        contents = [{"role": "user", "parts": [{"text": system}]}]
+        payload["contents"] = contents
+        return
+    part = contents[0]["parts"][0]
+    part["text"] = system + "\n\n" + part["text"]
+
+
 def default_transport(url: str, headers: dict, payload: dict, timeout: float) -> tuple[int, dict]:
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -655,7 +736,7 @@ class GeminiClient:
         self.log = log or (lambda event: print(json.dumps(event), flush=True))
 
     def generate(self, messages: list[dict]) -> str:
-        """Send one prompt. 5xx is retried up to SERVER_ATTEMPTS. Any other error stops."""
+        """Send one prompt. 503 backs off. A short per-minute 429 waits once."""
         system, contents = to_gemini(messages)
         payload = {
             "contents": contents,
@@ -665,12 +746,15 @@ class GeminiClient:
                 "responseMimeType": "application/json",
             },
         }
-        if system:
+        if system and not model_folds_system(self.model):
             payload["systemInstruction"] = {"parts": [{"text": system}]}
+        elif system:
+            _fold_system(payload, system)
         url = GEMINI_URL.format(model=self.model)
         headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
-        last_detail = ""
-        for attempt in range(SERVER_ATTEMPTS):
+        server_tries = 0
+        demand_tries = 0
+        while True:
             self.budget.acquire()
             try:
                 status, body = self.transport(url, headers, payload, self.timeout)
@@ -679,22 +763,40 @@ class GeminiClient:
                 raise
             prompt, candidates, total = _usage(body)
             self.budget.add_usage(prompt, candidates, total)
+            self.budget.note_status(status)
             self._emit(status=status)
-            if is_quota(status, body):
-                detail = http_detail(status, body, self.model)
-                self.budget.stop_reason = "quota"
-                self.budget.stop_detail = detail
-                raise QuotaStop(detail)
-            if status >= 500:
-                last_detail = (
-                    f"{http_detail(status, body, self.model)}. "
-                    f"Server error after {attempt + 1} of {SERVER_ATTEMPTS} requests."
-                )
-                if attempt + 1 < SERVER_ATTEMPTS:
+            if status != 429:
+                self.budget.consecutive_429 = 0
+            if status == HIGH_DEMAND_STATUS:
+                if demand_tries >= len(SERVER_BACKOFF_SECONDS):
+                    waited = ", ".join(str(item) for item in SERVER_BACKOFF_SECONDS)
+                    self._stop_network(
+                        f"{http_detail(status, body, self.model)}. "
+                        f"High demand after {demand_tries + 1} requests; waited {waited} seconds.",
+                        demand_tries,
+                    )
+                delay = SERVER_BACKOFF_SECONDS[demand_tries]
+                demand_tries += 1
+                self._wait(delay, status)
+                continue
+            if status == 429:
+                delay = minute_quota_wait(body)
+                if delay is not None and self.budget.consecutive_429 == 0:
+                    self.budget.consecutive_429 = 1
+                    self._wait(delay, status)
                     continue
-                self.budget.stop_reason = "network"
-                self.budget.stop_detail = last_detail
-                raise NetworkStop(last_detail)
+                self._stop_quota(self._quota_detail(status, body))
+            if is_quota(status, body):
+                self._stop_quota(http_detail(status, body, self.model))
+            if status >= 500:
+                server_tries += 1
+                detail = (
+                    f"{http_detail(status, body, self.model)}. "
+                    f"Server error after {server_tries} of {SERVER_ATTEMPTS} requests."
+                )
+                if server_tries < SERVER_ATTEMPTS:
+                    continue
+                self._stop_network(detail, server_tries)
             if status != 200:
                 detail = (
                     f"{http_detail(status, body, self.model)}. "
@@ -704,9 +806,43 @@ class GeminiClient:
                 self.budget.stop_detail = detail
                 raise FatalHTTPStop(detail)
             return _text_from_body(body)
+
+    def _quota_detail(self, status: int, body: dict) -> str:
+        detail = http_detail(status, body, self.model)
+        text = json.dumps(body).lower()
+        if self.budget.consecutive_429:
+            return detail + " A second consecutive 429 stopped the run."
+        if "per day" in text or "daily" in text:
+            return detail + " A per-day quota stopped the run."
+        return (
+            detail
+            + " The stated retry delay was missing or longer than the pause limit, so the run stopped."
+        )
+
+    def _stop_quota(self, detail: str) -> None:
+        self.budget.stop_reason = "quota"
+        self.budget.stop_detail = detail
+        raise QuotaStop(detail)
+
+    def _stop_network(self, detail: str, tries: int) -> None:
+        del tries
         self.budget.stop_reason = "network"
-        self.budget.stop_detail = last_detail or "server error"
-        raise NetworkStop(self.budget.stop_detail)
+        self.budget.stop_detail = detail
+        raise NetworkStop(detail)
+
+    def _wait(self, seconds: float, status: int) -> None:
+        self.log(
+            {
+                "event": "wait",
+                "status": status,
+                "sleep_sec": seconds,
+                "requests": self.budget.used,
+                "configured_requests_per_minute": self.budget.per_minute,
+                "effective_requests_per_minute": self.budget.effective_per_minute(),
+                "status_counts": self.budget.status_count_map(),
+            }
+        )
+        self.budget.sleep(seconds)
 
     def _emit(self, status: int | None) -> None:
         self.log(
@@ -718,6 +854,9 @@ class GeminiClient:
                 "candidates_tokens": self.budget.candidates_tokens,
                 "total_tokens": self.budget.total_tokens,
                 "status": status,
+                "configured_requests_per_minute": self.budget.per_minute,
+                "effective_requests_per_minute": self.budget.effective_per_minute(),
+                "status_counts": self.budget.status_count_map(),
             }
         )
 
@@ -814,6 +953,10 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
         budget.prompt_tokens = int(state.get("prompt_tokens") or 0)
         budget.candidates_tokens = int(state.get("candidates_tokens") or 0)
         budget.total_tokens = int(state.get("total_tokens") or 0)
+        for code, count in (state.get("status_counts") or {}).items():
+            budget.status_counts[int(code)] = int(count)
+        state["stopped_reason"] = None
+        state["stopped_detail"] = ""
         print(
             json.dumps(
                 {
@@ -825,9 +968,10 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                     "attempts_per_task": args.attempts,
                     "n_tasks": len(kept),
                     "note": (
-                        "A preflight request runs first. HTTP 429 and quota errors stop the run "
-                        "and are not retried. Any other 4xx stops the run on that response. "
-                        "A 5xx response is retried a few times, then the run stops. "
+                        "A preflight request runs first. HTTP 503 waits 20s, then 40s, then 80s. "
+                        "A per-minute 429 with a stated delay of 120s or less waits once. "
+                        "A per-day quota or a second consecutive 429 stops the run and saves the checkpoint. "
+                        "Any other 4xx stops on that response. "
                         "The cap is cumulative across resumes. "
                         "A key on a billed Google project can still incur charges up to this cap; "
                         "confirm billing is off before starting."
