@@ -19,6 +19,25 @@
   "tune_file": "finetune/data/distill/tune.jsonl",
   "teacher_model": "gemini-3.8-flash",
   "teacher_model_generation": 3.8,
+  "anthropic_model": "claude-haiku-5-5",
+  "anthropic_requests_per_minute": 20,
+  "anthropic_max_cost_usd": 5,
+  "anthropic_long_context_tokens": 100000,
+  "anthropic_prices_usd_per_million": {
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "output": 0.5,
+      "input_over_long_context": 0.5,
+      "output_over_long_context": 2.5
+    },
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
+    "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
+    "claude-sonnet-5-5": {"input": 2.0, "output": 10.0},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
+    "claude-opus-5-5": {"input": 4.0, "output": 20.0},
+    "claude-opus-5": {"input": 5.0, "output": 25.0}
+  },
+  "anthropic_fallback_price_usd_per_million": {"input": 15.0, "output": 75.0},
   "teacher_max_requests": 800,
   "teacher_requests_per_minute": 4,
   "teacher_attempts": 3,

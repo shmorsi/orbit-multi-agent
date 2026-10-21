@@ -71,14 +71,14 @@ The placeholder files at the top of `results/` stay pending. A harness file in `
 
 ## Distillation
 
-The templated 307 dialogs taught the JSON shape and not the counting. `finetune/distill_teacher.py` asks Gemini to act as planner, worker, and critic on train and tune tasks only. Each tool call runs in Orbit's sandbox. A trajectory is kept only when the task checker passes and every turn matches the role schema. Trap tasks stay in the pool so a correct refusal can be kept. The generator adds count, sum, threshold, log, quotient, write, and refusal variants on top of the 69 templated train tasks.
+The templated 307 dialogs taught the JSON shape and not the counting. `finetune/distill_teacher.py` asks a teacher model to act as planner, worker, and critic on train and tune tasks only. Each tool call runs in Orbit's sandbox. A trajectory is kept only when the task checker passes and every turn matches the role schema. Trap tasks stay in the pool so a correct refusal can be kept. The generator adds count, sum, threshold, log, quotient, write, and refusal variants on top of the 69 templated train tasks. Gemini and Claude write the same dialog files. Each kept dialog records the teacher model in its metadata, and `stats.json` records it too.
 
 The frozen test is a local blocklist. Its ids, questions, near-duplicates, distinctive fragments, and oracle calls are not placed in a request and are not written as rows. `--dry-run` prints the pool and does not read an API key.
 
-Cost controls, because this is meant for Gemini's free tier:
+Cost controls:
 
 - The hard cap defaults to 800 requests. The checkpoint counts requests already spent, so a restart does not reset the cap.
-- The client waits so the pace stays near 4 requests per minute. Each request log prints that configured rate, the effective rate since the run started, and the count per status code.
+- With `--provider gemini`, the client waits so the pace stays near 4 requests per minute. Each request log prints that configured rate, the effective rate since the run started, and the count per status code.
 - The first request is a preflight with no task text. A client error there exits before any task is sent.
 - HTTP 503 waits 20 seconds, then 40, then 80. Each of those retries counts toward the cap. After that the process stops.
 - A per-minute HTTP 429 whose stated retry delay is 120 seconds or less waits that long once and continues. A per-day quota, a longer delay, or a second consecutive 429 stops the process and writes the checkpoint.
@@ -90,16 +90,20 @@ Cost controls, because this is meant for Gemini's free tier:
 
 ```bash
 python finetune/distill_teacher.py --dry-run
-export ORBIT_TEACHER_API_KEY=your-key
+export ORBIT_ANTHROPIC_API_KEY=your-key
 python finetune/distill_teacher.py \
-  --model gemini-3.8-flash \
+  --provider anthropic \
+  --model claude-haiku-5-5 \
   --max-requests 800 \
-  --requests-per-minute 4 \
+  --requests-per-minute 20 \
+  --max-cost-usd 5 \
   --attempts 3 \
   --output finetune/data/distill
 ```
 
-The key is read from `ORBIT_TEACHER_API_KEY` only. The default model is `gemini-3.8-flash`. A stopped run resumes from `finetune/data/distill/checkpoint.json`. The kept dialogs are `train.jsonl` and `tune.jsonl` in that directory, in the same message format as the templated set, plus `stats.json` with attempts and pass rate per task family.
+The default provider is Anthropic and the default model is `claude-haiku-5-5`. A name that starts with `claude` selects Anthropic even without `--provider`. `--model` also accepts the Sonnet and Opus ids in the price table. The Anthropic key is read from `ORBIT_ANTHROPIC_API_KEY`. The pace defaults to 20 requests per minute. Request logs include input tokens, output tokens, and a running cost estimate in USD. The estimate uses the price table in `finetune/distill_teacher.py`. The same table is recorded in `finetune/configs/qlora_distill.json`. An unknown model uses the fallback price, 15 dollars per million input tokens and 75 dollars per million output tokens, so the cost limit cannot be under-counted. At 5 USD the run stops and writes the checkpoint. A response that says the credit balance is too low, or any other billing error, stops the same way. HTTP 429 and overloaded or other server errors wait 20 seconds, then 40, then 80, and each retry counts toward the cap. Any other client error stops on that response.
+
+Gemini is still available. Pass `--provider gemini` and set `ORBIT_TEACHER_API_KEY`. That path keeps the free-tier pace of 4 requests per minute and does not apply the dollar limit. A stopped run resumes from `finetune/data/distill/checkpoint.json`. The kept dialogs are `train.jsonl` and `tune.jsonl` in that directory, in the same message format as the templated set, plus `stats.json` with attempts and pass rate per task family.
 
 Train the student with `finetune/configs/qlora_distill.json`. In Colab, set `ORBIT_DISTILL=1` before the distillation cell in `finetune/colab_train.ipynb`. That cell trains the distill config and scores `team_distill` once. The three frozen scores above stay as they are. The comparison adds the distill pairs only when that file is present. Do not score the frozen test in a loop.
 
