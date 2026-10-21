@@ -38,12 +38,15 @@ from distill_teacher import (
     build_parser,
     estimate_cost_usd,
     resolve_runtime,
+    TeacherBackend,
     load_checkpoint,
     load_pool,
     main,
+    narrow_tasks,
     rows_from_result,
     run_distill,
     select_tasks,
+    teacher_contract,
     trajectory_ok,
     uses_frozen_oracle,
 )
@@ -81,12 +84,16 @@ def test_filter_keeps_checker_passes_and_drops_schema_or_checker_failures(tmp_pa
     assert {row["role"] for row in rows} >= {"planner", "worker", "critic"}
     assert overlap_error(rows, [], _read(TEST)) is None
     result.schema_invalid = 1
+    assert trajectory_ok(task, result) == (True, "ok")
+    saved = result.examples[-1]["messages"][-1]["content"]
+    result.examples[-1]["messages"][-1]["content"] = "not json"
     assert trajectory_ok(task, result) == (False, "schema")
+    result.examples[-1]["messages"][-1]["content"] = saved
     result.schema_invalid = 0
     result.status = "refuse"
     result.claims = []
     result.answer = "no"
-    assert trajectory_ok(task, result)[0] is False
+    assert trajectory_ok(task, result) == (False, "checker")
 
 
 def test_filter_keeps_a_correct_refusal(tmp_path):
@@ -679,13 +686,40 @@ def test_resume_counts_spent_requests_against_the_cap():
         calls["n"] += 1
         return 200, _ok_body()
 
-    budget = RequestBudget(3, 1000, clock=lambda: 50.0, sleep=lambda _seconds: None, used=2, last_request_at=50.0)
+    budget = RequestBudget(
+        3,
+        1000,
+        clock=lambda: 50.0,
+        sleep=lambda _seconds: None,
+        used=2,
+        last_request_at=50.0,
+        max_total_requests=3,
+    )
     client = _client(budget, transport)
     client.generate([{"role": "user", "content": "Task: one more"}])
     with pytest.raises(BudgetStop):
         client.generate([{"role": "user", "content": "Task: over the cap"}])
     assert calls["n"] == 1
     assert budget.used == 3
+
+
+def test_per_run_cap_ignores_the_checkpoint_total():
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 200, _ok_body()
+
+    budget = RequestBudget(2, 1000, clock=lambda: 0.0, sleep=lambda _seconds: None, used=800)
+    client = _client(budget, transport)
+    client.generate([{"role": "user", "content": "Task: first of this run"}])
+    client.generate([{"role": "user", "content": "Task: second of this run"}])
+    with pytest.raises(BudgetStop):
+        client.generate([{"role": "user", "content": "Task: over this run"}])
+    assert calls["n"] == 2
+    assert budget.session_used == 2
+    assert budget.used == 802
 
 
 def test_checkpoint_resume_does_not_call_the_teacher_again(tmp_path):
@@ -782,6 +816,8 @@ def test_budget_defaults_match_the_distill_config():
     args = build_parser().parse_args([])
     runtime = resolve_runtime(args)
     assert config["teacher_max_requests"] == DEFAULT_MAX_REQUESTS == args.max_requests == 800
+    assert config["teacher_max_total_requests"] is None
+    assert args.max_total_requests is None
     assert config["teacher_requests_per_minute"] == DEFAULT_REQUESTS_PER_MINUTE == 4
     assert runtime.provider == "anthropic"
     assert runtime.model == DEFAULT_MODEL == DEFAULT_ANTHROPIC_MODEL == "claude-haiku-5-5"
@@ -1203,3 +1239,133 @@ def test_cli_gemini_still_sends_a_temperature(monkeypatch, tmp_path):
             sleep=lambda _seconds: None,
         )
     assert seen[0]["generationConfig"]["temperature"] == GEMINI_TEMPERATURE == 0.4
+
+
+def test_families_and_limit_pick_a_smoke_slice():
+    tasks = [
+        {"id": "a", "family": "count_jobs", "subset": "train"},
+        {"id": "b", "family": "count_jobs", "subset": "train"},
+        {"id": "c", "family": "log", "subset": "train"},
+        {"id": "d", "family": "refusal", "subset": "train", "expect_refusal": True},
+    ]
+    chosen = narrow_tasks(tasks, families="log,count_jobs", limit=2)
+    assert [task["id"] for task in chosen] == ["a", "c"]
+    with pytest.raises(SystemExit):
+        narrow_tasks(tasks, families="nope", limit=None)
+
+
+def test_teacher_contract_names_the_schema_and_hides_the_value():
+    task = {
+        "expect_refusal": False,
+        "gold_claims": [{"name": "job_count", "citation": "call_1", "value": 5, "unit": "count"}],
+        "question": "How many jobs used printer-a?",
+    }
+    text = teacher_contract(task)
+    assert '"action": "tool"' in text
+    assert '"action": "final"' in text
+    assert "printed text" in text
+    assert "job_count (integer value, call_1)" in text
+    assert "is 5" not in text
+    assert '"value": 5' not in text
+
+    class Fake:
+        def generate(self, messages):
+            self.messages = messages
+            return "{}"
+
+    client = Fake()
+    backend = TeacherBackend(client, task)
+    messages = [
+        {"role": "system", "content": "You are the worker."},
+        {"role": "user", "content": "Task: How many jobs used printer-a?"},
+    ]
+    backend.complete(role="worker", messages=messages)
+    assert "Checker contract:" in client.messages[0]["content"]
+    backend.complete(role="worker", messages=messages)
+    assert client.messages[0]["content"].count("Checker contract:") == 1
+
+
+class _OracleTeacher:
+    def __init__(self, task):
+        self.inner = ScriptedBackend(task)
+        self.task = task
+
+    def complete(self, *, role, messages):
+        from distill_teacher import attach_teacher_contract
+
+        attach_teacher_contract(self.task, role, messages)
+        return self.inner.complete(role=role, messages=messages)
+
+
+class _ProseCritic(_OracleTeacher):
+    def complete(self, *, role, messages):
+        if role == "critic":
+            return "Looks good to me."
+        return super().complete(role=role, messages=messages)
+
+
+def _one_of_each(workspace, *families):
+    pool = load_pool(workspace)
+    kept, _dropped = select_tasks(pool, _read(TEST))
+    found = {}
+    for task in kept:
+        family = task.get("family")
+        if family in families and family not in found:
+            found[family] = task
+    missing = [family for family in families if family not in found]
+    assert not missing, missing
+    return [found[family] for family in families]
+
+
+def test_oracle_teacher_is_kept_for_count_log_refusal_and_multi(tmp_path):
+    tasks = _one_of_each(tmp_path / "pool", "count_jobs", "log", "refusal", "multi")
+    state = run_distill(
+        tasks,
+        _read(TEST),
+        backend_for=_OracleTeacher,
+        attempts=1,
+        workspace=tmp_path / "runs",
+        debug_dir=tmp_path / "debug",
+    )
+    for task in tasks:
+        record = state["tasks"][task["id"]]
+        assert record["accepted"] is True
+        assert record["last_reject"] is None
+        transcript = json.loads((tmp_path / "debug" / task["id"] / "attempt-1.json").read_text(encoding="utf-8"))
+        assert transcript["reject_reason"] is None
+        assert transcript["extracted"]["answer"] == task["answer"]
+        assert transcript["extracted"]["claims"] == task["gold_claims"]
+        assert transcript["expected"]["gold_claims"] == task["gold_claims"]
+        assert transcript["checker"]["success"] is True
+        assert any(event["agent"] == "tool" and event["kind"] == "result" for event in transcript["events"]) or task["expect_refusal"]
+        contracts = [
+            message["content"]
+            for example in transcript["examples"]
+            for message in example["messages"]
+            if "Checker contract:" in (message.get("content") or "")
+        ]
+        assert contracts
+        contract = contracts[0]
+        assert '"action": "final"' in contract
+        assert '"action": "tool"' in contract
+        for claim in task["gold_claims"]:
+            assert claim["name"] in contract
+            if "value" in claim:
+                assert f"is {claim['value']}" not in contract
+
+
+def test_prose_critic_still_keeps_a_correct_count(tmp_path):
+    count = _one_of_each(tmp_path / "pool", "count_jobs")[0]
+    state = run_distill(
+        [count],
+        _read(TEST),
+        backend_for=_ProseCritic,
+        attempts=1,
+        workspace=tmp_path / "runs",
+        debug_dir=tmp_path / "debug",
+    )
+    assert state["tasks"][count["id"]]["accepted"] is True
+    transcript = json.loads((tmp_path / "debug" / count["id"] / "attempt-1.json").read_text(encoding="utf-8"))
+    assert transcript["extracted"]["status"] == "answer"
+    assert transcript["extracted"]["answer"] == count["answer"]
+    assert "Stopped at the step limit" not in transcript["extracted"]["answer"]
