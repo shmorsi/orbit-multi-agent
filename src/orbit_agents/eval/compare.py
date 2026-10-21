@@ -22,14 +22,31 @@ def _rows(path: Path) -> tuple[dict, list[dict]]:
     return payload, payload["per_task"]
 
 
+BASE_PAIRS = (
+    ("team_base", "single_base"),
+    ("team_lora", "team_base"),
+    ("team_lora", "single_base"),
+)
+DISTILL_PAIRS = (
+    ("team_distill", "team_base"),
+    ("team_distill", "team_lora"),
+    ("team_distill", "single_base"),
+)
+
+
 def compare(paths: dict[str, Path], *, n_resamples: int = 10000, seed: int = 0) -> dict:
+    for name in ("single_base", "team_base", "team_lora"):
+        if name not in paths:
+            raise SystemExit(f"missing {name}")
     loaded = {name: _rows(path) for name, path in paths.items()}
     order = [row["id"] for row in loaded["team_base"][1]]
     for name, (_payload, rows) in loaded.items():
         if [row["id"] for row in rows] != order:
             raise SystemExit(f"{name} task order does not match the team base run")
     report = {"status": "measured", "kind": "comparison", "n_resamples": n_resamples, "seed": seed, "pairs": {}}
-    pairs = (("team_base", "single_base"), ("team_lora", "team_base"), ("team_lora", "single_base"))
+    pairs = list(BASE_PAIRS)
+    if "team_distill" in loaded:
+        pairs.extend(DISTILL_PAIRS)
     for left, right in pairs:
         left_rows = {row["id"]: row for row in loaded[left][1]}
         right_rows = {row["id"]: row for row in loaded[right][1]}
@@ -47,10 +64,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--single", type=Path, required=True)
     parser.add_argument("--team", type=Path, required=True)
     parser.add_argument("--lora", type=Path, required=True)
+    parser.add_argument("--distill", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
+    paths = {"single_base": args.single, "team_base": args.team, "team_lora": args.lora}
+    if args.distill is not None:
+        paths["team_distill"] = args.distill
     try:
-        report = compare({"single_base": args.single, "team_base": args.team, "team_lora": args.lora})
+        report = compare(paths)
     except SystemExit as exc:
         report = {
             "status": "pending",

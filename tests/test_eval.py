@@ -88,6 +88,37 @@ def test_tune_split_scores_only_the_dev_tune_tasks(tmp_path):
     assert all(row["success"] for row in report["per_task"])
 
 
+def test_three_way_comparison_matches_the_measured_v2_file():
+    report = compare(
+        {
+            "single_base": Path("results/v2_qwen1.5b/single_base.json"),
+            "team_base": Path("results/v2_qwen1.5b/team_base.json"),
+            "team_lora": Path("results/v2_qwen1.5b/team_lora.json"),
+        }
+    )
+    committed = json.loads(Path("results/v2_qwen1.5b/comparison.json").read_text(encoding="utf-8"))
+    assert report == committed
+
+
+def test_team_distill_pairs_extend_the_original_comparison(tmp_path):
+    paths = {
+        "single_base": Path("results/v2_qwen1.5b/single_base.json"),
+        "team_base": Path("results/v2_qwen1.5b/team_base.json"),
+        "team_lora": Path("results/v2_qwen1.5b/team_lora.json"),
+    }
+    base = compare(paths)
+    distill = tmp_path / "team_distill.json"
+    distill.write_text(Path("results/v2_qwen1.5b/team_lora.json").read_text(encoding="utf-8"), encoding="utf-8")
+    extra = compare({**paths, "team_distill": distill})
+    for key, value in base["pairs"].items():
+        assert extra["pairs"][key] == value
+    assert set(extra["pairs"]) == set(base["pairs"]) | {
+        "team_distill_minus_team_base",
+        "team_distill_minus_team_lora",
+        "team_distill_minus_single_base",
+    }
+
+
 def test_model_files_are_pending():
     for name in ("single_base.json", "team_base.json", "team_lora.json", "comparison.json", "finetune_eval.json"):
         payload = json.loads(Path("results", name).read_text(encoding="utf-8"))
