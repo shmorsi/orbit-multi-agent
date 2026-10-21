@@ -11,8 +11,11 @@ from distill_teacher import (
     DEFAULT_MAX_REQUESTS,
     DEFAULT_MODEL,
     DEFAULT_REQUESTS_PER_MINUTE,
+    HIGH_DEMAND_STATUS,
+    MINUTE_QUOTA_MAX_WAIT_SECONDS,
     PREFLIGHT_PROMPT,
     SERVER_ATTEMPTS,
+    SERVER_BACKOFF_SECONDS,
     BudgetStop,
     DistillStop,
     FatalHTTPStop,
@@ -46,14 +49,15 @@ def _ok_body(text="{}"):
 
 
 def _client(budget, transport, **kwargs):
-    return GeminiClient(
-        api_key="test-key",
-        model=DEFAULT_MODEL,
-        budget=budget,
-        transport=transport,
-        log=lambda _event: None,
-        **kwargs,
-    )
+    params = {
+        "api_key": "test-key",
+        "model": DEFAULT_MODEL,
+        "budget": budget,
+        "transport": transport,
+        "log": lambda _event: None,
+    }
+    params.update(kwargs)
+    return GeminiClient(**params)
 
 
 def test_filter_keeps_checker_passes_and_drops_schema_or_checker_failures(tmp_path):
@@ -251,6 +255,273 @@ def test_http_500_is_retried_a_bounded_number_of_times_then_stops():
     with pytest.raises(NetworkStop):
         client.generate([{"role": "user", "content": "Task: two"}])
     assert calls["n"] == SERVER_ATTEMPTS
+
+
+def _clocked_budget(max_requests=10, per_minute=1000.0):
+    clock = {"t": 0.0}
+    sleeps = []
+
+    def now():
+        return clock["t"]
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["t"] += seconds
+
+    budget = RequestBudget(max_requests, per_minute, clock=now, sleep=sleep)
+    return budget, sleeps
+
+
+def _minute_429(delay=54):
+    return {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "message": (
+                "Quota exceeded generate_content_free_tier_requests, "
+                f"limit: 5 per minute. Please retry in {delay}s"
+            ),
+        }
+    }
+
+
+def test_http_503_waits_with_bounded_backoff_and_counts_each_request():
+    calls = {"n": 0}
+    logs = []
+    budget, sleeps = _clocked_budget()
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 503, {"error": {"message": "high demand", "status": "UNAVAILABLE"}}
+
+    client = _client(budget, transport, log=logs.append)
+    with pytest.raises(NetworkStop) as caught:
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert "HTTP 503" in str(caught.value)
+    assert "High demand" in str(caught.value)
+    assert calls["n"] == len(SERVER_BACKOFF_SECONDS) + 1
+    assert sleeps == list(SERVER_BACKOFF_SECONDS)
+    assert budget.used == len(SERVER_BACKOFF_SECONDS) + 1
+    request_logs = [row for row in logs if row["event"] == "request"]
+    assert request_logs[-1]["status_counts"] == {"503": len(SERVER_BACKOFF_SECONDS) + 1}
+    assert request_logs[-1]["configured_requests_per_minute"] == 1000
+    assert request_logs[-1]["effective_requests_per_minute"] == pytest.approx(
+        budget.used / (sum(SERVER_BACKOFF_SECONDS) / 60.0)
+    )
+    with pytest.raises(NetworkStop):
+        client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == len(SERVER_BACKOFF_SECONDS) + 1
+
+
+def test_http_503_then_200_continues_after_one_backoff():
+    calls = {"n": 0}
+    budget, sleeps = _clocked_budget(per_minute=4)
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 503, {"error": {"message": "high demand"}}
+        return 200, _ok_body('{"ok": true}')
+
+    client = _client(budget, transport)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == '{"ok": true}'
+    assert calls["n"] == 2
+    assert budget.used == 2
+    assert sleeps == [20]
+
+
+def test_per_minute_429_waits_once_then_continues():
+    calls = {"n": 0}
+    logs = []
+    budget, _sleeps = _clocked_budget(per_minute=4)
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        if calls["n"] in {1, 3}:
+            return 429, _minute_429(54)
+        return 200, _ok_body("{}")
+
+    client = _client(budget, transport, log=logs.append)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == "{}"
+    assert client.generate([{"role": "user", "content": "Task: two"}]) == "{}"
+    assert calls["n"] == 4
+    assert budget.used == 4
+    request_logs = [row for row in logs if row["event"] == "request"]
+    assert request_logs[-1]["status_counts"]["429"] == 2
+    assert request_logs[-1]["status_counts"]["200"] == 2
+    assert request_logs[-1]["configured_requests_per_minute"] == 4
+    waits = [row for row in logs if row["event"] == "wait"]
+    assert [row["sleep_sec"] for row in waits] == [54, 54]
+
+
+def test_second_consecutive_429_stops_without_a_second_wait():
+    calls = {"n": 0}
+    budget, sleeps = _clocked_budget()
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 429, _minute_429(54)
+
+    client = _client(budget, transport)
+    with pytest.raises(QuotaStop) as caught:
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert "second consecutive" in str(caught.value)
+    assert sleeps == [54]
+    assert calls["n"] == 2
+    with pytest.raises(QuotaStop):
+        client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == 2
+
+
+def test_per_day_429_stops_without_waiting():
+    calls = {"n": 0}
+    budget, sleeps = _clocked_budget()
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 429, {
+            "error": {
+                "message": "Quota exceeded generate_content_free_tier_requests, limit: 20 per day. Please retry in 3600s"
+            }
+        }
+
+    client = _client(budget, transport)
+    with pytest.raises(QuotaStop) as caught:
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert "per-day" in str(caught.value)
+    assert sleeps == []
+    assert calls["n"] == 1
+    with pytest.raises(QuotaStop):
+        client.generate([{"role": "user", "content": "Task: two"}])
+    assert calls["n"] == 1
+
+
+def test_long_retry_delay_stops_without_waiting():
+    calls = {"n": 0}
+    budget, sleeps = _clocked_budget()
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 429, _minute_429(121)
+
+    client = _client(budget, transport)
+    with pytest.raises(QuotaStop) as caught:
+        client.generate([{"role": "user", "content": "Task: one"}])
+    assert "pause limit" in str(caught.value)
+    assert sleeps == []
+    assert calls["n"] == 1
+
+
+def test_retry_info_delay_is_honored_once():
+    calls = {"n": 0}
+    budget, sleeps = _clocked_budget()
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 429, {
+                "error": {
+                    "message": "Quota exceeded, limit: 5 per minute.",
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                            "retryDelay": "54s",
+                        }
+                    ],
+                }
+            }
+        return 200, _ok_body("{}")
+
+    client = _client(budget, transport)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == "{}"
+    assert sleeps == [54]
+    assert calls["n"] == 2
+
+
+def test_gemma_folds_the_system_prompt_into_the_user_turn():
+    seen = {}
+
+    def transport(url, headers, payload, timeout):
+        del headers, timeout
+        seen["url"] = url
+        seen["payload"] = payload
+        return 200, _ok_body("{}")
+
+    client = _client(
+        _fast_budget(),
+        transport,
+        model="gemma-4-31b-it",
+    )
+    client.generate(
+        [
+            {"role": "system", "content": "You are the planner."},
+            {"role": "user", "content": "Task: count the trays."},
+        ]
+    )
+    assert "gemma-4-31b-it" in seen["url"]
+    assert "systemInstruction" not in seen["payload"]
+    text = seen["payload"]["contents"][0]["parts"][0]["text"]
+    assert text.startswith("You are the planner.")
+    assert "Task: count the trays." in text
+
+
+def test_gemini_keeps_the_system_instruction_field():
+    seen = {}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, timeout
+        seen["payload"] = payload
+        return 200, _ok_body("{}")
+
+    client = _client(_fast_budget(), transport, model="gemini-3.5-flash")
+    client.generate(
+        [
+            {"role": "system", "content": "You are the planner."},
+            {"role": "user", "content": "Task: count the trays."},
+        ]
+    )
+    assert seen["payload"]["systemInstruction"]["parts"][0]["text"] == "You are the planner."
+    assert seen["payload"]["contents"][0]["parts"][0]["text"] == "Task: count the trays."
+
+
+def test_per_day_429_saves_a_checkpoint(monkeypatch, tmp_path):
+    monkeypatch.setenv("ORBIT_TEACHER_API_KEY", "test-key")
+    task = task_by_id("dev-001")
+    monkeypatch.setattr("distill_teacher.load_pool", lambda _workspace: [dict(task)])
+    calls = {"n": 0}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        calls["n"] += 1
+        return 429, {
+            "error": {
+                "message": "Quota exceeded generate_content_free_tier_requests, limit: 20 per day."
+            }
+        }
+
+    output = tmp_path / "out"
+    with pytest.raises(SystemExit) as caught:
+        main(
+            ["--output", str(output), "--max-requests", "20", "--requests-per-minute", "1000"],
+            transport=transport,
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
+        )
+    assert caught.value.code == 2
+    assert calls["n"] == 1
+    checkpoint = json.loads((output / "checkpoint.json").read_text(encoding="utf-8"))
+    assert checkpoint["requests"] == 1
+    assert checkpoint["stopped_reason"] == "quota"
+    assert checkpoint["tasks"] == {}
+    assert checkpoint["status_counts"]["429"] == 1
+    stats = json.loads((output / "stats.json").read_text(encoding="utf-8"))
+    assert stats["status_counts"]["429"] == 1
 
 
 def test_http_500_then_200_returns_the_success():
@@ -470,7 +741,10 @@ def test_budget_defaults_match_the_distill_config():
     config = json.loads(Path("finetune/configs/qlora_distill.json").read_text(encoding="utf-8"))
     args = build_parser().parse_args([])
     assert config["teacher_max_requests"] == DEFAULT_MAX_REQUESTS == args.max_requests == 800
-    assert config["teacher_requests_per_minute"] == DEFAULT_REQUESTS_PER_MINUTE == args.requests_per_minute == 8
+    assert config["teacher_requests_per_minute"] == DEFAULT_REQUESTS_PER_MINUTE == args.requests_per_minute == 4
+    assert config["server_backoff_seconds"] == list(SERVER_BACKOFF_SECONDS) == [20, 40, 80]
+    assert config["minute_quota_max_wait_seconds"] == MINUTE_QUOTA_MAX_WAIT_SECONDS == 120
+    assert config["high_demand_status"] == HIGH_DEMAND_STATUS == 503
     assert config["teacher_attempts"] == DEFAULT_ATTEMPTS == args.attempts == 3
     assert config["teacher_model"] == DEFAULT_MODEL == args.model == "gemini-3.8-flash"
     assert config["teacher_model_generation"] == 3.8
