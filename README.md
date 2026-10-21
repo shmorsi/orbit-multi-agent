@@ -78,11 +78,13 @@ The frozen test is a local blocklist. Its ids, questions, near-duplicates, disti
 Cost controls, because this is meant for Gemini's free tier:
 
 - The hard cap defaults to 800 requests. The checkpoint counts requests already spent, so a restart does not reset the cap.
-- The client waits so the pace stays near 8 requests per minute.
-- The first request is a preflight with no task text. A client error or a quota error there exits before any task is sent.
-- HTTP status 429 and a quota body stop the process. Those calls are not retried.
+- The client waits so the pace stays near 4 requests per minute. Each request log prints that configured rate, the effective rate since the run started, and the count per status code.
+- The first request is a preflight with no task text. A client error there exits before any task is sent.
+- HTTP 503 waits 20 seconds, then 40, then 80. Each of those retries counts toward the cap. After that the process stops.
+- A per-minute HTTP 429 whose stated retry delay is 120 seconds or less waits that long once and continues. A per-day quota, a longer delay, or a second consecutive 429 stops the process and writes the checkpoint.
 - Any other client error stops the process on that response. The run does not send another request.
-- A server error is tried up to 3 times, then the process stops.
+- Another server error is tried up to 3 times, then the process stops.
+- A model whose name starts with gemma does not receive a system instruction field. That text is placed in the first user turn.
 - Token counts and the request total are printed as JSON lines.
 - If the Google project has billing turned on, successful calls can still incur charges up to the cap. Confirm billing is off before you export the key.
 
@@ -92,7 +94,7 @@ export ORBIT_TEACHER_API_KEY=your-key
 python finetune/distill_teacher.py \
   --model gemini-3.8-flash \
   --max-requests 800 \
-  --requests-per-minute 8 \
+  --requests-per-minute 4 \
   --attempts 3 \
   --output finetune/data/distill
 ```
