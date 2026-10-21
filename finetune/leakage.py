@@ -21,6 +21,15 @@ BUILT_FROM = "eval/dev.jsonl and corpus tool scenarios; eval/test.jsonl was not 
 NEAR_DUPLICATE_RATIO = 0.9
 
 
+class FrozenTestLeak(RuntimeError):
+    """A prompt or row would have carried frozen-test material. Nothing was sent."""
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.reason = "leakage"
+        self.detail = detail
+
+
 def _read(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -52,6 +61,35 @@ def _near_duplicate(left: str, right: str) -> bool:
     if folded_left == folded_right or folded_left in folded_right or folded_right in folded_left:
         return True
     return SequenceMatcher(None, folded_left, folded_right).ratio() >= NEAR_DUPLICATE_RATIO
+
+
+def blocking_test_task(question: str, test_rows: list[dict]) -> dict | None:
+    """Return the frozen task whose question matches, or None.
+
+    Used to keep a candidate out of the teacher prompt. The test question is not copied.
+    """
+    for task in test_rows:
+        if question == task["question"] or _near_duplicate(question, task["question"]):
+            return task
+    return None
+
+
+def guard_messages(messages: list[dict], test_rows: list[dict]) -> None:
+    """Raise FrozenTestLeak before a prompt that contains a frozen id or question is sent."""
+    blob = "\n".join((message.get("content") or "") for message in messages)
+    for task in test_rows:
+        task_id = task["id"]
+        question = task["question"]
+        if task_id and task_id in blob:
+            raise FrozenTestLeak(f"test id {task_id}")
+        if question and question in blob:
+            raise FrozenTestLeak(f"test question {task_id}")
+        for line in blob.splitlines():
+            if not line.startswith("Task: "):
+                continue
+            asked = line[len("Task: ") :].strip()
+            if asked == question or _near_duplicate(question, asked):
+                raise FrozenTestLeak(f"near-duplicate of {task_id}")
 
 
 def overlap_error(train_rows: list[dict], tune_rows: list[dict], test_rows: list[dict]) -> str | None:

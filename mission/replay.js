@@ -159,6 +159,52 @@ function pulse(fromName, toName) {
   if (trail) moveDot(trail, start, end, quiet, 90);
 }
 
+function phaseOf(event) {
+  if (!event) return null;
+  if (event.agent === "tool" || (event.payload && event.payload.action === "tool")) return "tool";
+  if (event.agent === "critic" || event.kind === "revise") return "critic";
+  if (event.agent === "planner") return "planner";
+  if (event.agent === "worker") return "worker";
+  return null;
+}
+
+function telemetryText(event) {
+  if (!event) return "Awaiting uplink";
+  if (event.kind === "result") {
+    const result = event.result || {};
+    const body = result.stdout || result.error || JSON.stringify(result);
+    return `${event.call}  ${event.tool}\n${String(body).trim()}`;
+  }
+  if (event.payload && event.payload.action === "tool") {
+    const args = event.payload.arguments || {};
+    const body = args.code || args.expression || args.query || args.path || "";
+    return `CALL  ${event.payload.tool}\n${String(body).slice(0, 320)}`;
+  }
+  if (event.payload && event.payload.action === "final") {
+    return `FINAL  ${event.payload.status}\n${event.payload.answer || ""}`;
+  }
+  if (event.payload && event.payload.verdict) {
+    return `CRITIC  ${event.payload.verdict}\n${event.payload.reason || ""}`;
+  }
+  if (event.payload && Array.isArray(event.payload.steps)) {
+    if (!event.payload.steps.length) return "PLAN  empty\nThe corpus cannot answer.";
+    return event.payload.steps.map((step, index) => `${index + 1}. ${step.tool}  ${step.goal}`).join("\n");
+  }
+  if (event.kind === "revise") return `REVISE\n${event.reason || ""}`;
+  if (event.kind === "invalid") return `INVALID\n${event.error || ""}`;
+  if (typeof event.content === "string") return event.content.slice(0, 320);
+  return event.kind;
+}
+
+function paintPhase(shown) {
+  const last = shown[shown.length - 1];
+  const phase = phaseOf(last);
+  const items = document.querySelectorAll("#phases li");
+  items.forEach((item) => item.classList.toggle("on", item.dataset.phase === phase));
+  const box = document.getElementById("telemetry");
+  if (box) box.textContent = telemetryText(last);
+}
+
 function focusAgent(event) {
   for (const seat of Object.values(seats)) seat.classList.remove("lit");
   const name = event.agent === "tool" ? "worker" : event.agent;
@@ -206,6 +252,7 @@ function render() {
     log.append(item);
   }
   const last = shown[shown.length - 1];
+  paintPhase(shown);
   if (last) {
     focusAgent(last);
     const dock = document.getElementById("dock");

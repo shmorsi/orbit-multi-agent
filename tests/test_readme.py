@@ -42,6 +42,7 @@ def test_readme_numbers_come_from_committed_files():
     result_numbers = set()
     result_files = list(Path("results").glob("*.json"))
     result_files.extend(Path("results/v1_qwen0.5b").glob("*.json"))
+    result_files.extend(Path("results/v2_qwen1.5b").glob("*.json"))
     for path in result_files:
         result_numbers |= _json_numbers(path)
     allowed_outside = set(result_numbers)
@@ -50,6 +51,7 @@ def test_readme_numbers_come_from_committed_files():
         Path("data/stats.json"),
         Path("data/manifest.json"),
         Path("finetune/data/manifest.json"),
+        Path("finetune/configs/qlora_distill.json"),
     ):
         allowed_outside |= _json_numbers(path)
 

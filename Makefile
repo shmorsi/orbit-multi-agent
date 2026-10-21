@@ -28,3 +28,6 @@ finetune-data:
 
 finetune-dry-run:
 	$(PYTHON) finetune/train.py --config finetune/configs/qlora_small.json --dry-run
+
+distill-dry-run:
+	$(PYTHON) finetune/distill_teacher.py --dry-run

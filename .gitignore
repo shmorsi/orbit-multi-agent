@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 .ipynb_checkpoints/
 finetune/outputs/
+finetune/outputs-distill/
+finetune/data/distill/
 traces/*
 !traces/.gitkeep
 demo/frames/

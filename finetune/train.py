@@ -18,18 +18,40 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "finetune"))
 
 from leakage import check as leakage_check  # noqa: E402
+from leakage import overlap_error  # noqa: E402
+from leakage import _read as read_jsonl_rows  # noqa: E402
 
 TRAIN_PATH = ROOT / "finetune" / "data" / "train.jsonl"
 TUNE_PATH = ROOT / "finetune" / "data" / "tune.jsonl"
+DATA_ROOT = (ROOT / "finetune" / "data").resolve()
 FORBIDDEN = (ROOT / "eval" / "test.jsonl").resolve()
 
 
 def assert_training_file(path: Path) -> Path:
     resolved = path.resolve()
-    allowed = {TRAIN_PATH.resolve(), TUNE_PATH.resolve()}
-    if resolved == FORBIDDEN or resolved not in allowed:
+    if resolved == FORBIDDEN or resolved.name == "test.jsonl":
+        raise SystemExit(f"refusing to train on {resolved}")
+    if resolved != DATA_ROOT and DATA_ROOT not in resolved.parents:
+        raise SystemExit(f"refusing to train on {resolved}")
+    if resolved.name not in {"train.jsonl", "tune.jsonl"}:
         raise SystemExit(f"refusing to train on {resolved}")
     return resolved
+
+
+def data_paths(config: dict) -> tuple[Path, Path]:
+    train_rel = config.get("train_file") or "finetune/data/train.jsonl"
+    tune_rel = config.get("tune_file") or "finetune/data/tune.jsonl"
+    return assert_training_file(ROOT / train_rel), assert_training_file(ROOT / tune_rel)
+
+
+def guard_rows(train_rows: list[dict], tune_rows: list[dict], train_path: Path, tune_path: Path) -> None:
+    from leakage import TEST
+
+    error = overlap_error(train_rows, tune_rows, read_jsonl_rows(TEST))
+    if error:
+        raise SystemExit(error)
+    if train_path.resolve() == TRAIN_PATH.resolve() and tune_path.resolve() == TUNE_PATH.resolve():
+        leakage_check()
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -132,15 +154,16 @@ def train(config: dict, output_dir: Path) -> None:
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
-    leakage_check()
+    train_path, tune_path = data_paths(config)
     method = config["method"]
     if method == "qlora" and not torch.cuda.is_available():
         raise SystemExit(
             "QLoRA needs a CUDA GPU and is optional. Use finetune/colab_train.ipynb, "
             "or --method lora for fp16/fp32 on MPS or CPU. The demo does not need bitsandbytes."
         )
-    train_rows = load_rows(TRAIN_PATH)
-    tune_rows = load_rows(TUNE_PATH)
+    train_rows = load_rows(train_path)
+    tune_rows = load_rows(tune_path)
+    guard_rows(train_rows, tune_rows, train_path, tune_path)
     tokenizer = AutoTokenizer.from_pretrained(config["base_model"])
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -264,9 +287,11 @@ def main(argv: list[str] | None = None) -> None:
     config = json.loads(args.config.read_text(encoding="utf-8"))
     if args.method:
         config["method"] = args.method
-    leakage = leakage_check()
-    train_rows = load_rows(TRAIN_PATH)
-    tune_rows = load_rows(TUNE_PATH)
+    train_path, tune_path = data_paths(config)
+    train_rows = load_rows(train_path)
+    tune_rows = load_rows(tune_path)
+    guard_rows(train_rows, tune_rows, train_path, tune_path)
+    leakage = {"ok": True}
     if args.dry_run:
         print(
             json.dumps(
