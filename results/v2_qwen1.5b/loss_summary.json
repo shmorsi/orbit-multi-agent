@@ -1,0 +1,16 @@
+{
+  "status": "measured",
+  "kind": "training_loss",
+  "source": "results/v2_qwen1.5b/train_log.jsonl",
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "qwen_generation": 2.5,
+  "parameter_billions": 1.5,
+  "method": "qlora",
+  "n_logged_rows": 15,
+  "first_logged_step": 10,
+  "first_logged_loss": 1.152004337310791,
+  "last_logged_step": 150,
+  "last_logged_loss": 0.05106291174888611,
+  "min_logged_loss": 0.041804739832878114,
+  "note": "Logged training loss only. Not a task-success score."
+}
