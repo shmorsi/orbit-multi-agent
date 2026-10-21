@@ -79,7 +79,10 @@ Cost controls, because this is meant for Gemini's free tier:
 
 - The hard cap defaults to 800 requests. The checkpoint counts requests already spent, so a restart does not reset the cap.
 - The client waits so the pace stays near 8 requests per minute.
-- HTTP status 429, a quota body, and a network failure stop the process. The failed call is not retried.
+- The first request is a preflight with no task text. A client error or a quota error there exits before any task is sent.
+- HTTP status 429 and a quota body stop the process. Those calls are not retried.
+- Any other client error stops the process on that response. The run does not send another request.
+- A server error is tried up to 3 times, then the process stops.
 - Token counts and the request total are printed as JSON lines.
 - If the Google project has billing turned on, successful calls can still incur charges up to the cap. Confirm billing is off before you export the key.
 
@@ -87,14 +90,14 @@ Cost controls, because this is meant for Gemini's free tier:
 python finetune/distill_teacher.py --dry-run
 export ORBIT_TEACHER_API_KEY=your-key
 python finetune/distill_teacher.py \
-  --model gemini-2.5-flash \
+  --model gemini-3.8-flash \
   --max-requests 800 \
   --requests-per-minute 8 \
   --attempts 3 \
   --output finetune/data/distill
 ```
 
-The key is read from `ORBIT_TEACHER_API_KEY` only. The default model is `gemini-2.5-flash`. A stopped run resumes from `finetune/data/distill/checkpoint.json`. The kept dialogs are `train.jsonl` and `tune.jsonl` in that directory, in the same message format as the templated set, plus `stats.json` with attempts and pass rate per task family.
+The key is read from `ORBIT_TEACHER_API_KEY` only. The default model is `gemini-3.8-flash`. A stopped run resumes from `finetune/data/distill/checkpoint.json`. The kept dialogs are `train.jsonl` and `tune.jsonl` in that directory, in the same message format as the templated set, plus `stats.json` with attempts and pass rate per task family.
 
 Train the student with `finetune/configs/qlora_distill.json`. In Colab, set `ORBIT_DISTILL=1` before the distillation cell in `finetune/colab_train.ipynb`. That cell trains the distill config and scores `team_distill` once. The three frozen scores above stay as they are. The comparison adds the distill pairs only when that file is present. Do not score the frozen test in a loop.
 
