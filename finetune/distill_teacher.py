@@ -7,7 +7,9 @@ the same JSONL files. Each kept dialog records the teacher model.
 
 The default teacher is Anthropic claude-haiku-5-5. A model name that starts
 with claude selects that provider. The key is ORBIT_ANTHROPIC_API_KEY. The
-pace is about 20 requests per minute. A price table estimates USD from input
+pace is about 20 requests per minute. Anthropic requests omit temperature
+unless --temperature is set, because newer models reject that field. Replies
+are read from text blocks only. A price table estimates USD from input
 and output tokens; an unknown model uses a high fallback price. The run stops
 at 5 USD, and on a credit-balance or other billing error. HTTP 429 and server
 errors, including 529, wait 20s, then 40s, then 80s.
@@ -79,6 +81,7 @@ DEFAULT_MAX_REQUESTS = 800
 DEFAULT_REQUESTS_PER_MINUTE = 4.0
 ANTHROPIC_REQUESTS_PER_MINUTE = 20.0
 DEFAULT_MAX_COST_USD = 5.0
+GEMINI_TEMPERATURE = 0.4
 DEFAULT_ATTEMPTS = 3
 SERVER_ATTEMPTS = 3
 SERVER_BACKOFF_SECONDS = (20, 40, 80)
@@ -820,7 +823,7 @@ class GeminiClient:
         model: str,
         budget: RequestBudget,
         transport=None,
-        temperature: float = 0.4,
+        temperature: float = GEMINI_TEMPERATURE,
         max_output_tokens: int = 512,
         timeout: float = 60.0,
         log=None,
@@ -967,21 +970,58 @@ class GeminiClient:
         )
 
 
+def _as_token_count(value) -> int:
+    """Coerce a usage field to a token count. Nested details are not counts."""
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value if value > 0 else 0
+    if isinstance(value, float):
+        return int(value) if value > 0 else 0
+    if isinstance(value, str):
+        try:
+            parsed = float(value)
+        except ValueError:
+            return 0
+        return int(parsed) if parsed > 0 else 0
+    return 0
+
+
 def _anthropic_usage(body: dict) -> tuple[int, int, int]:
-    usage = body.get("usage") or {}
-    prompt = int(usage.get("input_tokens") or 0)
-    output = int(usage.get("output_tokens") or 0)
+    """Billed input and output tokens.
+
+    Newer models add output_tokens_details.thinking_tokens, cache counters,
+    and other usage fields. output_tokens already includes thinking tokens,
+    so those details are not added again. This client does not send
+    cache_control, so cache fields are left out of the estimate.
+    """
+    if not isinstance(body, dict):
+        return 0, 0, 0
+    usage = body.get("usage")
+    if not isinstance(usage, dict):
+        return 0, 0, 0
+    prompt = _as_token_count(usage.get("input_tokens"))
+    output = _as_token_count(usage.get("output_tokens"))
     return prompt, output, prompt + output
 
 
 def _text_from_anthropic(body: dict) -> str:
-    parts = body.get("content") or []
-    texts = [
-        part.get("text", "")
-        for part in parts
-        if isinstance(part, dict) and part.get("type", "text") == "text"
-    ]
-    return "\n".join(text for text in texts if text).strip()
+    """Join type=text blocks. Thinking and any other block type are ignored."""
+    if not isinstance(body, dict):
+        return ""
+    content = body.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    texts: list[str] = []
+    for part in content:
+        if not isinstance(part, dict) or part.get("type") != "text":
+            continue
+        text = part.get("text")
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    return "\n".join(texts)
 
 
 def to_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
@@ -1008,7 +1048,7 @@ class AnthropicClient:
         budget: RequestBudget,
         max_cost_usd: float,
         transport=None,
-        temperature: float = 0.4,
+        temperature: float | None = None,
         max_output_tokens: int = 512,
         timeout: float = 60.0,
         log=None,
@@ -1025,7 +1065,7 @@ class AnthropicClient:
         self.max_cost_usd = float(max_cost_usd)
         self.budget.track_cost = True
         self.transport = default_transport if transport is None else transport
-        self.temperature = temperature
+        self.temperature = None if temperature is None else float(temperature)
         self.max_output_tokens = max_output_tokens
         self.timeout = timeout
         self.log = log or (lambda event: print(json.dumps(event), flush=True))
@@ -1033,12 +1073,17 @@ class AnthropicClient:
     def generate(self, messages: list[dict]) -> str:
         self._raise_if_cost_reached()
         system, contents = to_anthropic(messages)
+        # Newer Claude models reject temperature, top_p, and top_k. Send
+        # temperature only when the caller set --temperature. max_tokens stays:
+        # the Messages API still requires it, and a live call without sampling
+        # fields succeeds.
         payload = {
             "model": self.model,
             "max_tokens": self.max_output_tokens,
-            "temperature": self.temperature,
             "messages": contents,
         }
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
         if system:
             payload["system"] = system
         headers = {
@@ -1064,7 +1109,9 @@ class AnthropicClient:
                 self.budget.price_source = source
             self.budget.note_status(status)
             self._emit(status=status)
-            if is_billing(body):
+            # A finished reply can mention billing inside a thinking block.
+            # Only an error response is a billing stop.
+            if status != 200 and is_billing(body):
                 detail = (
                     f"{http_detail(status, body, self.model)}. "
                     "A billing error stopped the run. The checkpoint is saved."
@@ -1234,7 +1281,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attempts", type=int, default=DEFAULT_ATTEMPTS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--checkpoint", type=Path, default=None)
-    parser.add_argument("--temperature", type=float, default=0.4)
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help=(
+            "Sampling temperature. Anthropic omits this field unless it is set. "
+            f"Gemini uses {GEMINI_TEMPERATURE:g} when it is omitted."
+        ),
+    )
     parser.add_argument("--max-output-tokens", type=int, default=512)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--api-key-env", default=None)
@@ -1328,7 +1383,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                 model=args.model,
                 budget=budget,
                 transport=transport,
-                temperature=args.temperature,
+                temperature=GEMINI_TEMPERATURE if args.temperature is None else args.temperature,
                 max_output_tokens=args.max_output_tokens,
             )
 
