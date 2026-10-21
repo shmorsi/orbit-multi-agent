@@ -1272,14 +1272,14 @@ def teacher_contract(task: dict) -> str:
         'calculator arguments are {"expression": "integers with + - * //"}.',
         'read_file arguments are {"path": "<corpus path>"}.',
         'write_file arguments are {"path": "<workspace file>", "content": "<text>"}.',
-        'python arguments are {"code": "<code>"}. The python tool keeps only printed text. Use table, text, print, len, sum, min, max, and int. Do not import.',
+        'python arguments are {"code": "<code>"}. The python tool keeps only printed text. Read a table with table("jobs") or table("shifts") and a bundled file with text("path"). print the computed value. Do not paste file text into code. Use table, text, print, len, sum, min, max, and int. Do not import.',
         'retrieve and web_search arguments are {"query": "..."}.',
         'Final answer: {"action": "final", "status": "answer", "answer": "<name> is <value>.", "claims": [{"name": "<name>", "value": 0, "unit": "count", "citation": "call_1"}]}.',
         'A text claim uses "text" instead of "value", and the answer is "<name> is <text>.".',
         "citation call_1 is the first tool result and call_2 is the second, in the order the tools ran.",
-        "Every number in the answer must appear in the question or in a tool result.",
+        "Every number in the answer must appear in the question or in a tool result, or be the integer a successful python call printed, or be the number of lines in the cited text that contain a token from the question.",
         'Refusal: {"action": "final", "status": "refuse", "answer": "The bundled corpus has no record that answers this.", "claims": []}.',
-        'Critic: {"verdict": "accept", "reason": "..."} or {"verdict": "revise", "reason": "..."}.',
+        'Critic: {"verdict": "accept", "reason": "..."} or {"verdict": "revise", "reason": "..."}. One JSON object only, with no markdown and no surrounding prose.',
     ]
     claims = task.get("gold_claims") or []
     if task.get("expect_refusal") or not claims:
