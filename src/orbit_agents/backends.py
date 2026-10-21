@@ -1,4 +1,4 @@
-"""Local inference only. QLoRA and bitsandbytes are not imported on this path."""
+"""Local inference only. bitsandbytes is imported only when CUDA eval loads a 4-bit base model."""
 
 from __future__ import annotations
 
@@ -29,8 +29,55 @@ def inference_dtype(device: str, torch_module):
     return torch_module.float16
 
 
+def eval_loads_in_4bit(device: str) -> bool:
+    """CUDA eval keeps the base in 4-bit and attaches the adapter. MPS and CPU stay in fp16 or fp32."""
+    return device == "cuda"
+
+
+def torchao_is_compatible(version: str | None) -> bool:
+    """Peft rejects torchao 0.10, which Colab preinstalls. Missing torchao is fine."""
+    if version is None:
+        return True
+    parts: list[int] = []
+    for piece in version.split("."):
+        digits = ""
+        for char in piece:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int(digits))
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3]) > (0, 16, 0)
+
+
+def assert_torchao_allows_peft() -> None:
+    try:
+        import torchao
+    except ImportError as exc:
+        text = str(exc).lower()
+        if "torchao" in text and ("incompatible" in text or "version" in text):
+            raise ImportError(
+                "torchao is installed at a version this stack cannot load. Run: pip uninstall -y torchao"
+            ) from exc
+        return
+    version = getattr(torchao, "__version__", None)
+    if not torchao_is_compatible(str(version) if version else None):
+        raise ImportError(
+            f"Found an incompatible version of torchao. Found version {version}, "
+            "but only versions above 0.16.0 are supported. Run: pip uninstall -y torchao"
+        )
+
+
 class TransformersBackend:
-    """Qwen instruct via transformers. An adapter is merged in fp16 or fp32, never 4-bit, on MPS and CPU."""
+    """Qwen instruct via transformers.
+
+    On CUDA the base model is loaded in 4-bit and an adapter is attached, not merged.
+    On MPS and CPU an adapter is merged in fp16 or fp32. bitsandbytes is imported only for the CUDA path.
+    """
 
     def __init__(self, model: str, adapter: str | None = None, max_new_tokens: int = 256):
         import torch
@@ -38,20 +85,43 @@ class TransformersBackend:
 
         self.torch = torch
         self.device = pick_device(torch)
-        dtype = inference_dtype(self.device, torch)
+        self.load_in_4bit = eval_loads_in_4bit(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained(model)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        try:
-            loaded = AutoModelForCausalLM.from_pretrained(model, dtype=dtype)
-        except TypeError:
-            loaded = AutoModelForCausalLM.from_pretrained(model, torch_dtype=dtype)
-        if adapter:
-            from peft import PeftModel
+        if self.load_in_4bit:
+            from transformers import BitsAndBytesConfig
 
-            loaded = PeftModel.from_pretrained(loaded, adapter)
-            loaded = loaded.merge_and_unload()
-        self.model = loaded.to(self.device)
+            quantization = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+            loaded = AutoModelForCausalLM.from_pretrained(
+                model,
+                quantization_config=quantization,
+                device_map="auto",
+            )
+            if adapter:
+                assert_torchao_allows_peft()
+                from peft import PeftModel
+
+                loaded = PeftModel.from_pretrained(loaded, adapter)
+            self.model = loaded
+        else:
+            dtype = inference_dtype(self.device, torch)
+            try:
+                loaded = AutoModelForCausalLM.from_pretrained(model, dtype=dtype)
+            except TypeError:
+                loaded = AutoModelForCausalLM.from_pretrained(model, torch_dtype=dtype)
+            if adapter:
+                assert_torchao_allows_peft()
+                from peft import PeftModel
+
+                loaded = PeftModel.from_pretrained(loaded, adapter)
+                loaded = loaded.merge_and_unload()
+            self.model = loaded.to(self.device)
         self.model.eval()
         self.max_new_tokens = max_new_tokens
 
