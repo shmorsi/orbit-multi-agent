@@ -6,7 +6,7 @@
 
 # Orbit
 
-Orbit is a local planner, worker, and critic over a fictional makerspace corpus. The worker calls tools. The critic sends a bad claim back. A gate refuses any claim the cited tool result does not contain. Mission Control replays the JSONL trace, including a task you start on your own machine.
+Orbit is a local planner, worker, and critic over a fictional makerspace corpus. The worker calls tools. The critic sends a bad claim back. A gate keeps a claim when the cited tool result contains it, when a successful python call printed the count, or when the count equals the number of lines in the cited text that contain a token from the question. Otherwise the gate refuses the claim. Mission Control replays the JSONL trace, including a task you start on your own machine.
 
 The measured 1.5B QLoRA run learned the answer format. On the frozen 12-task test it did not produce a task-success gain this sample can support. The paired interval for task success includes zero. That is the result, and the page says so.
 
@@ -41,13 +41,13 @@ flowchart LR
   student --> score[One frozen score]
 ```
 
-The tools are a sandboxed Python cell, a calculator, corpus file read, a per-run file write, keyword retrieval over the bundled notes, and an offline web cache. Nothing in the tool path opens a socket. The teacher script is the only piece that calls Gemini, and only with a train or tune prompt.
+The tools are a sandboxed Python cell that reads a bundled table or file by path, a calculator, corpus file read, a per-run file write, keyword retrieval over the bundled notes, tables, and logs, and an offline web cache. Nothing in the tool path opens a socket. The teacher script is the only piece that calls Gemini, and only with a train or tune prompt.
 
 Flight rules, from the code the replay reads:
 
 - The planner returns at most four steps, or an empty plan when the corpus cannot answer.
-- The worker emits one tool call or a final answer. Every claim cites a tool result that contains it.
-- The critic accepts grounded claims. Otherwise it revises, at most 2 times, and then the gate refuses unsupported claims.
+- The worker emits one tool call or a final answer. A claim cites a tool result that contains it, a python call that printed the count, or text with that many matching lines.
+- The critic replies with one JSON object. It accepts a grounded claim, including a count printed by python and a count of matching lines in the cited text. Otherwise it revises, at most 2 times, and then the gate refuses unsupported claims.
 - The team stops after 8 turns. A broken schema gets 2 tries on that turn.
 
 ## Results
@@ -67,6 +67,8 @@ The adapter's two answerable successes sit next to a missed trap: correct refusa
 The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were 2 of 12, 2 of 12, then 1 of 12, with schema-valid rates 0.0, 0.07083333333333335, and 0.6131944444444445. Logged loss went from 1.3191939353942872 to 0.20024461746215821. Its task-success interval also failed to clear zero. Fine-tuning taught the format.
 
 The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config. It has not been scored.
+
+The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
 <!-- RESULTS_END -->
 
 ## Distillation
@@ -105,7 +107,7 @@ The default provider is Anthropic and the default model is `claude-haiku-5-5`. A
 
 Gemini is still available. Pass `--provider gemini` and set `ORBIT_TEACHER_API_KEY`. That path keeps the free-tier pace of 4 requests per minute and does not apply the dollar limit. A stopped run resumes from `finetune/data/distill/checkpoint.json`. The kept dialogs are `train.jsonl` and `tune.jsonl` in that directory, in the same message format as the templated set, plus `stats.json` with attempts and pass rate per task family.
 
-Train the student with `finetune/configs/qlora_distill.json`. In Colab, set `ORBIT_DISTILL=1` before the distillation cell in `finetune/colab_train.ipynb`. That cell trains the distill config and scores `team_distill` once. The three frozen scores above stay as they are. The comparison adds the distill pairs only when that file is present. Do not score the frozen test in a loop.
+Train the student with `finetune/configs/qlora_distill.json`. In Colab, set `ORBIT_DISTILL=1` before the distillation cell in `finetune/colab_train.ipynb`. That cell trains the distill config and scores `team_distill` once. The harness is now v3, so a fair comparison needs a fresh score of single_base, team_base, team_lora, and team_distill on the frozen test. Set `ORBIT_RESCORE=1` before the rescore cell. That cell does not train. It writes the four scores once under `results/v3_qwen1.5b/`. The v2 numbers stay archived in `results/v2_qwen1.5b/`. The comparison adds the distill pairs only when that file is present. Do not score the frozen test in a loop.
 
 ## Quickstart
 

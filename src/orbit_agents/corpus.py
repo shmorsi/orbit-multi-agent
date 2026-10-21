@@ -22,6 +22,21 @@ def corpus_files() -> list[Path]:
     return sorted(path for path in CORPUS.rglob("*") if path.is_file())
 
 
+def corpus_guide() -> str:
+    """Files and tables the worker can read. This does not open or hash the corpus."""
+    files = ", ".join(path.relative_to(CORPUS).as_posix() for path in corpus_files())
+    tables = ", ".join(f"{name} ({relative})" for name, relative in sorted(TABLES.items()))
+    return (
+        "Bundled files: "
+        + files
+        + ". Tables: "
+        + tables
+        + ". In python, table(name) returns the rows of a table and text(path) returns one of these files. "
+        + "print the value you computed. Do not paste file text into code. "
+        + "read_file uses the same relative path."
+    )
+
+
 def write_manifest() -> dict:
     files = {}
     for path in corpus_files():
