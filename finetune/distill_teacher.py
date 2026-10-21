@@ -22,7 +22,7 @@ waits once; a per-day quota or a second consecutive 429 stops.
 
 Shared controls:
 
-- hard cap on API requests (800), counted across resumes
+- hard cap on API requests for this run (800). The checkpoint total does not block the next run unless --max-total-requests is set
 - one preflight request, then the task loop
 - any 4xx other than 429 stops on that response
 - HTTP 503 waits 20s, then 40s, then 80s; each retry counts toward the cap
@@ -160,7 +160,11 @@ class CostStop(DistillStop):
 
 
 class RequestBudget:
-    """Counts every outbound call and spaces them out. The count survives a resume."""
+    """Counts every outbound call and spaces them out.
+
+    max_requests is this process only. used is the checkpoint total.
+    max_total_requests, when set, stops the run once that total is reached.
+    """
 
     def __init__(
         self,
@@ -171,6 +175,7 @@ class RequestBudget:
         sleep=None,
         used: int = 0,
         last_request_at: float | None = None,
+        max_total_requests: int | None = None,
     ):
         if max_requests < 1:
             raise ValueError("max_requests must be at least 1")
@@ -182,6 +187,9 @@ class RequestBudget:
         self.clock = time.time if clock is None else clock
         self.sleep = time.sleep if sleep is None else sleep
         self.used = int(used)
+        if max_total_requests is not None and int(max_total_requests) < 1:
+            raise ValueError("max_total_requests must be at least 1")
+        self.max_total_requests = None if max_total_requests is None else int(max_total_requests)
         self.last_request_at = last_request_at
         self.prompt_tokens = 0
         self.candidates_tokens = 0
@@ -207,7 +215,10 @@ class RequestBudget:
             raise BillingStop(self.stop_detail or "stopped after a billing error")
         if self.stop_reason == "cost":
             raise CostStop(self.stop_detail or "stopped after the cost limit")
-        if self.stop_reason == "request_cap" or self.used >= self.max_requests:
+        if self.stop_reason == "request_cap" or self.session_used >= self.max_requests:
+            self.stop_reason = "request_cap"
+            raise BudgetStop()
+        if self.max_total_requests is not None and self.used >= self.max_total_requests:
             self.stop_reason = "request_cap"
             raise BudgetStop()
         now = float(self.clock())
@@ -253,6 +264,25 @@ def family_of(task: dict) -> str:
     if len(tools) == 1 and tools[0]:
         return str(tools[0])
     return "other"
+
+
+def narrow_tasks(tasks: list[dict], *, families: str | None, limit: int | None) -> list[dict]:
+    """Keep the named families, round-robin them, then take the first limit tasks."""
+    chosen = list(tasks)
+    if families:
+        names = [part.strip() for part in families.split(",") if part.strip()]
+        known = {family_of(task) for task in chosen}
+        unknown = [name for name in names if name not in known]
+        if unknown:
+            raise SystemExit("Unknown family: " + ", ".join(unknown))
+        wanted = set(names)
+        chosen = [task for task in chosen if family_of(task) in wanted]
+    chosen = interleave(chosen)
+    if limit is not None:
+        if limit < 1:
+            raise SystemExit("--limit-tasks must be at least 1")
+        chosen = chosen[:limit]
+    return chosen
 
 
 def interleave(tasks: list[dict]) -> list[dict]:
@@ -370,12 +400,14 @@ def select_tasks(tasks: list[dict], test_rows: list[dict]) -> tuple[list[dict], 
 
 
 def trajectory_ok(task: dict, result) -> tuple[bool, str]:
-    """Keep a run only when the checker passes and every turn was schema-valid."""
+    """Keep a run when the checker passes and every saved turn is schema-valid.
+
+    A repaired call increments schema_invalid, but that call is not saved.
+    The checker already accepted the extracted final, so the repair is not a reject.
+    """
     scored = score_task(task, result)
     if not scored["success"]:
         return False, "checker"
-    if int(result.schema_invalid) != 0:
-        return False, "schema"
     examples = list(result.examples or [])
     if not examples:
         return False, "empty"
@@ -491,6 +523,39 @@ def sync_budget(state: dict, budget: RequestBudget | None) -> None:
     state["price_source"] = budget.price_source
 
 
+def write_attempt_debug(debug_dir: Path, task: dict, result, *, attempt: int, reason: str) -> None:
+    """Save the transcript the tempfile run directory used to discard."""
+    folder = debug_dir / str(task["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    scored = score_task(task, result)
+    payload = {
+        "id": task["id"],
+        "family": family_of(task),
+        "question": task["question"],
+        "attempt": attempt,
+        "reject_reason": None if reason == "ok" else reason,
+        "extracted": {
+            "status": result.status,
+            "answer": result.answer,
+            "claims": result.claims,
+        },
+        "expected": {
+            "expect_refusal": bool(task.get("expect_refusal")),
+            "status": task.get("status"),
+            "answer": task.get("answer"),
+            "gold_claims": task.get("gold_claims") or [],
+        },
+        "checker": scored,
+        "events": result.events,
+        "examples": result.examples,
+        "tool_calls": result.tool_calls,
+    }
+    (folder / f"attempt-{attempt}.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def run_distill(
     tasks: list[dict],
     test_rows: list[dict],
@@ -501,6 +566,7 @@ def run_distill(
     state: dict | None = None,
     budget: RequestBudget | None = None,
     teacher_model: str = "",
+    debug_dir: Path | None = None,
 ) -> dict:
     """Rejection-sample team runs. A client or quota error stops the run."""
     state = state or fresh_state()
@@ -548,6 +614,8 @@ def run_distill(
                     state[bucket].extend(rows)
                     record["accepted"] = True
             record["last_reject"] = None if ok else why
+            if debug_dir is not None:
+                write_attempt_debug(debug_dir, task, result, attempt=record["attempts"], reason=why)
             sync_budget(state, budget)
         state["tasks"][task["id"]] = record
     sync_budget(state, budget)
@@ -1192,12 +1260,64 @@ class AnthropicClient:
         )
 
 
+_CONTRACT_MARK = "Checker contract:"
+
+
+def teacher_contract(task: dict) -> str:
+    """The final-answer and tool-call JSON the checker scores. Values stay hidden."""
+    lines = [
+        _CONTRACT_MARK + " reply with one JSON object and no prose.",
+        'Planner: {"steps": [{"goal": "...", "tool": "python|read_file|write_file|calculator|retrieve|web_search"}]} or {"steps": []} when the corpus has no record.',
+        'Tool call: {"action": "tool", "tool": "<name>", "arguments": { ... }}.',
+        'calculator arguments are {"expression": "integers with + - * //"}.',
+        'read_file arguments are {"path": "<corpus path>"}.',
+        'write_file arguments are {"path": "<workspace file>", "content": "<text>"}.',
+        'python arguments are {"code": "<code>"}. The python tool keeps only printed text. Use table, text, print, len, sum, min, max, and int. Do not import.',
+        'retrieve and web_search arguments are {"query": "..."}.',
+        'Final answer: {"action": "final", "status": "answer", "answer": "<name> is <value>.", "claims": [{"name": "<name>", "value": 0, "unit": "count", "citation": "call_1"}]}.',
+        'A text claim uses "text" instead of "value", and the answer is "<name> is <text>.".',
+        "citation call_1 is the first tool result and call_2 is the second, in the order the tools ran.",
+        "Every number in the answer must appear in the question or in a tool result.",
+        'Refusal: {"action": "final", "status": "refuse", "answer": "The bundled corpus has no record that answers this.", "claims": []}.',
+        'Critic: {"verdict": "accept", "reason": "..."} or {"verdict": "revise", "reason": "..."}.',
+    ]
+    claims = task.get("gold_claims") or []
+    if task.get("expect_refusal") or not claims:
+        lines.append("This task is a refusal. status is refuse, claims is empty, and the answer has no digit.")
+    else:
+        parts = []
+        for claim in claims:
+            kind = "integer value" if "value" in claim else "text"
+            parts.append(f"{claim['name']} ({kind}, {claim['citation']})")
+        lines.append(
+            "The checker requires these claim names and citations, and it does not reveal the values: "
+            + "; ".join(parts)
+            + "."
+        )
+    return " ".join(lines)
+
+
+def attach_teacher_contract(task: dict, role: str, messages: list[dict]) -> None:
+    """Add the checker contract once. Retries reuse the same message list."""
+    del role
+    if not messages:
+        return
+    contract = teacher_contract(task)
+    if any(_CONTRACT_MARK in (message.get("content") or "") for message in messages):
+        return
+    if messages[0].get("role") == "system":
+        messages[0]["content"] = messages[0]["content"] + "\n\n" + contract
+        return
+    messages.insert(0, {"role": "system", "content": contract})
+
+
 class TeacherBackend:
-    def __init__(self, client: GeminiClient):
+    def __init__(self, client: GeminiClient, task: dict):
         self.client = client
+        self.task = task
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
-        del role
+        attach_teacher_contract(self.task, role, messages)
         return self.client.generate(messages)
 
 
@@ -1211,14 +1331,17 @@ def _start_note(provider: str) -> str:
         return (
             "A preflight request runs first. HTTP 429 and server errors wait 20s, then 40s, then 80s. "
             "Any other 4xx stops on that response. A billing error or the cost limit stops the run "
-            "and saves the checkpoint. The request cap and the cost estimate are cumulative across resumes."
+            "and saves the checkpoint. This run stops at its own request cap. "
+            "The checkpoint total blocks a later run only when --max-total-requests is set. "
+            "The cost estimate stays cumulative."
         )
     return (
         "A preflight request runs first. HTTP 503 waits 20s, then 40s, then 80s. "
         "A per-minute 429 with a stated delay of 120s or less waits once. "
         "A per-day quota or a second consecutive 429 stops the run and saves the checkpoint. "
         "Any other 4xx stops on that response. "
-        "The cap is cumulative across resumes. "
+        "This run stops at its own request cap. "
+        "The checkpoint total blocks a later run only when --max-total-requests is set. "
         "A key on a billed Google project can still incur charges up to this cap; "
         "confirm billing is off before starting."
     )
@@ -1275,8 +1398,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Distill Orbit trajectories from a Gemini or Claude teacher")
     parser.add_argument("--provider", choices=("gemini", "anthropic"), default=None)
     parser.add_argument("--model", default=None)
-    parser.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS)
+    parser.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS, help="Cap for this run only")
+    parser.add_argument(
+        "--max-total-requests",
+        type=int,
+        default=None,
+        help="Optional cumulative cap across the checkpoint",
+    )
     parser.add_argument("--requests-per-minute", type=float, default=None)
+    parser.add_argument("--limit-tasks", type=int, default=None)
+    parser.add_argument("--families", default=None, help="Comma-separated family names, such as count_jobs,log,refusal")
+    parser.add_argument("--debug-dir", type=Path, default=None, help="Write every attempt transcript here")
     parser.add_argument("--max-cost-usd", type=float, default=DEFAULT_MAX_COST_USD)
     parser.add_argument("--attempts", type=int, default=DEFAULT_ATTEMPTS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -1304,6 +1436,7 @@ def _budget_from_state(state: dict, args, clock=None, sleep=None) -> RequestBudg
         sleep=sleep,
         used=int(state.get("requests") or 0),
         last_request_at=state.get("last_request_at"),
+        max_total_requests=args.max_total_requests,
     )
 
 
@@ -1317,11 +1450,14 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
         raise SystemExit("--max-cost-usd must be zero or more")
     if args.attempts < 1:
         raise SystemExit("--attempts must be at least 1")
+    if args.max_total_requests is not None and args.max_total_requests < 1:
+        raise SystemExit("--max-total-requests must be at least 1")
     scratch = Path(tempfile.mkdtemp(prefix="orbit-distill-"))
     try:
         pool = load_pool(scratch / "pool")
         test_rows = _read(TEST)
         kept, dropped = select_tasks(pool, test_rows)
+        kept = narrow_tasks(kept, families=args.families, limit=args.limit_tasks)
         if args.dry_run:
             report = dry_report(kept, dropped)
             report["provider"] = args.provider
@@ -1359,6 +1495,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                     "requests_per_minute": args.requests_per_minute,
                     "max_cost_usd": args.max_cost_usd,
                     "estimated_cost_usd": budget.estimated_cost_usd,
+                    "max_total_requests": args.max_total_requests,
                     "requests_already_used": budget.used,
                     "attempts_per_task": args.attempts,
                     "n_tasks": len(kept),
@@ -1387,8 +1524,8 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                 max_output_tokens=args.max_output_tokens,
             )
 
-        def backend_for(_task):
-            return TeacherBackend(client)
+        def backend_for(task):
+            return TeacherBackend(client, task)
 
         try:
             preflight(client)
@@ -1401,6 +1538,7 @@ def main(argv: list[str] | None = None, *, transport=None, clock=None, sleep=Non
                 state=state,
                 budget=budget,
                 teacher_model=args.model,
+                debug_dir=args.debug_dir,
             )
         except DistillStop as exc:
             state["stopped_reason"] = exc.reason
