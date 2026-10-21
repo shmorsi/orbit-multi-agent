@@ -20,8 +20,11 @@
   "teacher_model": "gemini-3.8-flash",
   "teacher_model_generation": 3.8,
   "teacher_max_requests": 800,
-  "teacher_requests_per_minute": 8,
+  "teacher_requests_per_minute": 4,
   "teacher_attempts": 3,
   "server_error_attempts": 3,
+  "high_demand_status": 503,
+  "server_backoff_seconds": [20, 40, 80],
+  "minute_quota_max_wait_seconds": 120,
   "stop_on_http_status": 429
 }
