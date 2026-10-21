@@ -13,6 +13,7 @@ from distill_teacher import (
     ANTHROPIC_REQUESTS_PER_MINUTE,
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_GEMINI_MODEL,
+    GEMINI_TEMPERATURE,
     DEFAULT_MAX_COST_USD,
     DEFAULT_MODEL,
     DEFAULT_REQUESTS_PER_MINUTE,
@@ -890,6 +891,10 @@ def test_anthropic_request_uses_the_messages_api():
     assert seen["payload"]["system"] == "You are the planner."
     assert seen["payload"]["messages"] == [{"role": "user", "content": "Task: count the trays."}]
     assert "systemInstruction" not in seen["payload"]
+    assert "temperature" not in seen["payload"]
+    assert "top_p" not in seen["payload"]
+    assert "top_k" not in seen["payload"]
+    assert set(seen["payload"]) == {"model", "max_tokens", "system", "messages"}
 
 
 def test_anthropic_429_and_529_back_off_then_continue():
@@ -1041,3 +1046,160 @@ def test_kept_dialog_records_the_teacher_model():
     )
     assert rows[0]["metadata"]["teacher_model"] == "claude-sonnet-5-5"
     assert rows[0]["messages"][0]["role"] == "user"
+
+
+def test_anthropic_text_blocks_ignore_thinking_and_extra_usage():
+    seen = {}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, timeout
+        seen["payload"] = payload
+        return 200, {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-haiku-5-5",
+            "stop_reason": "end_turn",
+            "content": [
+                {
+                    "type": "thinking",
+                    "thinking": "credit balance is too low if this mentions billing",
+                    "signature": "sig",
+                },
+                {"type": "redacted_thinking", "data": "hidden"},
+                {"text": "ignored because it has no type"},
+                {"type": "text", "text": ["not a string"]},
+                {"type": "text", "text": "{\"ok\": true}"},
+            ],
+            "usage": {
+                "input_tokens": 20,
+                "output_tokens": 11,
+                "cache_creation_input_tokens": 100,
+                "cache_read_input_tokens": 50,
+                "output_tokens_details": {"thinking_tokens": 7},
+                "cache_creation": {"ephemeral_5m_input_tokens": 0},
+                "service_tier": "standard",
+            },
+        }
+
+    budget = _fast_budget()
+    client = _anthropic_client(budget, transport)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == '{"ok": true}'
+    assert "temperature" not in seen["payload"]
+    assert budget.prompt_tokens == 20
+    assert budget.candidates_tokens == 11
+    assert budget.total_tokens == 31
+
+
+def test_anthropic_string_content_and_odd_usage_do_not_crash():
+    def transport(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        return 200, {"content": "{\"a\": 1}", "usage": ["not", "a", "dict"], "stop_reason": "end_turn"}
+
+    client = _anthropic_client(_fast_budget(), transport)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == '{"a": 1}'
+
+    def string_tokens(url, headers, payload, timeout):
+        del url, headers, payload, timeout
+        return 200, {
+            "content": [{"type": "text", "text": "{}"}],
+            "usage": {"input_tokens": "8", "output_tokens": None, "output_tokens_details": {"thinking_tokens": 4}},
+        }
+
+    client = _anthropic_client(_fast_budget(), string_tokens)
+    assert client.generate([{"role": "user", "content": "Task: two"}]) == "{}"
+    assert client.budget.prompt_tokens == 8
+    assert client.budget.candidates_tokens == 0
+
+
+def test_anthropic_sends_temperature_only_when_set():
+    seen = {}
+
+    def transport(url, headers, payload, timeout):
+        del url, headers, timeout
+        seen["payload"] = payload
+        return 200, _anthropic_body("{}")
+
+    client = _anthropic_client(_fast_budget(), transport, temperature=0)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == "{}"
+    assert seen["payload"]["temperature"] == 0
+
+
+def _stop_after_preflight(seen):
+    def transport(url, headers, payload, timeout):
+        del url, headers, timeout
+        seen.append(payload)
+        return 400, {"error": {"type": "invalid_request_error", "message": "stop the test"}}
+
+    return transport
+
+
+def test_cli_omits_anthropic_temperature_unless_set(monkeypatch, tmp_path):
+    monkeypatch.setenv("ORBIT_ANTHROPIC_API_KEY", "test-key")
+    task = task_by_id("dev-001")
+    monkeypatch.setattr("distill_teacher.load_pool", lambda _workspace: [dict(task)])
+    omitted = []
+    with pytest.raises(SystemExit) as caught:
+        main(
+            [
+                "--output",
+                str(tmp_path / "out"),
+                "--provider",
+                "anthropic",
+                "--max-requests",
+                "5",
+                "--requests-per-minute",
+                "1000",
+            ],
+            transport=_stop_after_preflight(omitted),
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
+        )
+    assert caught.value.code == 1
+    assert omitted
+    assert "temperature" not in omitted[0]
+    assert set(omitted[0]) == {"model", "max_tokens", "messages"}
+    explicit = []
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--output",
+                str(tmp_path / "explicit"),
+                "--provider",
+                "anthropic",
+                "--temperature",
+                "0",
+                "--max-requests",
+                "5",
+                "--requests-per-minute",
+                "1000",
+            ],
+            transport=_stop_after_preflight(explicit),
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
+        )
+    assert explicit[0]["temperature"] == 0
+
+
+def test_cli_gemini_still_sends_a_temperature(monkeypatch, tmp_path):
+    monkeypatch.setenv("ORBIT_TEACHER_API_KEY", "test-key")
+    task = task_by_id("dev-001")
+    monkeypatch.setattr("distill_teacher.load_pool", lambda _workspace: [dict(task)])
+    seen = []
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--provider",
+                "gemini",
+                "--output",
+                str(tmp_path / "out"),
+                "--max-requests",
+                "5",
+                "--requests-per-minute",
+                "1000",
+            ],
+            transport=_stop_after_preflight(seen),
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
+        )
+    assert seen[0]["generationConfig"]["temperature"] == GEMINI_TEMPERATURE == 0.4
