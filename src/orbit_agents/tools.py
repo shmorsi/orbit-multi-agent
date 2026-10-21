@@ -8,13 +8,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from orbit_agents.corpus import CORPUS, read_text
+from orbit_agents.corpus import CORPUS, TABLES, read_text
 from orbit_agents.schema import TOOL_SCHEMAS, validate
 
 _ALLOWED_NODES = {
     ast.Module,
     ast.Expr,
     ast.Assign,
+    ast.AugAssign,
     ast.If,
     ast.For,
     ast.While,
@@ -230,23 +231,42 @@ def _tokens(text: str) -> set[str]:
     return {token for token in cleaned.split() if len(token) >= 3}
 
 
-def run_retrieve(query: str) -> dict:
-    paragraphs: list[tuple[str, str]] = []
+def _search_cards() -> list[tuple[str, str, int]]:
+    """Notes first, then a card per table and log. Equal overlap keeps the note."""
+    cards: list[tuple[str, str, int]] = []
     docs = CORPUS / "docs"
-    for path in sorted(docs.glob("*.md")):
-        relative = path.relative_to(CORPUS).as_posix()
-        for block in path.read_text(encoding="utf-8").split("\n\n"):
-            text = block.strip()
-            if text and not text.startswith("#"):
-                paragraphs.append((relative, text))
+    if docs.is_dir():
+        for path in sorted(docs.glob("*.md")):
+            relative = path.relative_to(CORPUS).as_posix()
+            for block in path.read_text(encoding="utf-8").split("\n\n"):
+                text = block.strip()
+                if text and not text.startswith("#"):
+                    cards.append((relative, text, 0))
+    for name, relative in sorted(TABLES.items()):
+        header = (CORPUS / relative).read_text(encoding="utf-8").splitlines()[0].strip()
+        text = (
+            f"Table {name} is file {relative} with columns {header}. "
+            f"Read it in python with table('{name}')."
+        )
+        cards.append((relative, text, 1))
+    logs = CORPUS / "logs"
+    if logs.is_dir():
+        for path in sorted(logs.glob("*.log")):
+            relative = path.relative_to(CORPUS).as_posix()
+            text = f"Log file {relative}. Read it in python with text('{relative}') or read_file."
+            cards.append((relative, text, 1))
+    return cards
+
+
+def run_retrieve(query: str) -> dict:
     query_tokens = _tokens(query)
     ranked = sorted(
-        paragraphs,
-        key=lambda item: (-len(query_tokens & _tokens(item[1])), item[0], item[1]),
+        _search_cards(),
+        key=lambda item: (-len(query_tokens & _tokens(item[1])), item[2], item[0], item[1]),
     )
     if not ranked or not (query_tokens & _tokens(ranked[0][1])):
         return {"ok": True, "query": query, "matches": []}
-    source, text = ranked[0]
+    source, text, _group = ranked[0]
     return {"ok": True, "query": query, "matches": [{"path": source, "text": text}]}
 
 

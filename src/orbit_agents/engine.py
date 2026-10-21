@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from orbit_agents.corpus import corpus_guide
 from orbit_agents.prompts import CRITIC_SYSTEM, PLANNER_SYSTEM, SINGLE_SYSTEM, WORKER_SYSTEM
 from orbit_agents.schema import check_role, dumps, normalize_payload
 from orbit_agents.tools import call_tool
@@ -51,18 +52,26 @@ class RunResult:
 
 
 def extract_json(raw: str) -> dict:
-    start = raw.find("{")
-    if start < 0:
-        raise ValueError("no JSON object")
+    """Take the first JSON object, including one wrapped in prose or a code fence."""
+    text = raw.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
     decoder = json.JSONDecoder()
-    try:
-        payload, _end = decoder.raw_decode(raw[start:])
-    except json.JSONDecodeError:
-        cleaned = re.sub(r",(\s*[}\]])", r"\1", raw[start:])
-        payload, _end = decoder.raw_decode(cleaned)
-    if not isinstance(payload, dict):
-        raise ValueError("JSON value is not an object")
-    return payload
+    start = 0
+    while True:
+        index = text.find("{", start)
+        if index < 0:
+            raise ValueError("no JSON object")
+        snippet = text[index:]
+        cleaned = re.sub(r",(\s*[}\]])", r"\1", snippet)
+        for candidate in (snippet, cleaned):
+            try:
+                payload, _end = decoder.raw_decode(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        start = index + 1
 
 
 def contains_number(text: str, value: int) -> bool:
@@ -90,20 +99,214 @@ def _text_in_blob(text: str, blob: str) -> bool:
     return bool(folded) and folded in haystack
 
 
+# Plain words that show up in almost every question. A line count may cite an identifier
+# (a hyphenated name, or a token that contains a digit) and not one of these words.
+_GENERIC_TOKENS = {
+    "about",
+    "according",
+    "add",
+    "after",
+    "all",
+    "and",
+    "answer",
+    "any",
+    "are",
+    "before",
+    "bundled",
+    "cache",
+    "can",
+    "cell",
+    "claim",
+    "claims",
+    "contain",
+    "contains",
+    "copy",
+    "corpus",
+    "count",
+    "coverage",
+    "divided",
+    "docs",
+    "does",
+    "every",
+    "failed",
+    "failure",
+    "file",
+    "for",
+    "from",
+    "give",
+    "grams",
+    "greater",
+    "has",
+    "have",
+    "hours",
+    "how",
+    "integer",
+    "into",
+    "its",
+    "jobs",
+    "line",
+    "lines",
+    "log",
+    "logs",
+    "longer",
+    "machine",
+    "makerspace",
+    "many",
+    "material",
+    "mean",
+    "means",
+    "minutes",
+    "more",
+    "not",
+    "note",
+    "offline",
+    "open",
+    "outcome",
+    "over",
+    "page",
+    "person",
+    "phrase",
+    "python",
+    "quotient",
+    "read",
+    "recorded",
+    "result",
+    "results",
+    "rows",
+    "say",
+    "sentence",
+    "shift",
+    "shifts",
+    "single",
+    "still",
+    "table",
+    "than",
+    "that",
+    "their",
+    "then",
+    "this",
+    "those",
+    "token",
+    "tool",
+    "tools",
+    "total",
+    "under",
+    "use",
+    "used",
+    "using",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "whose",
+    "with",
+    "workspace",
+    "your",
+}
+
+
+def _support_tokens(question: str) -> list[str]:
+    cleaned = "".join(ch if ch.isalnum() or ch == "-" else " " for ch in question)
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for raw in cleaned.split():
+        token = raw.strip("-")
+        if not token or token in seen or token.isdigit():
+            continue
+        distinctive = "-" in token or any(ch.isdigit() for ch in token)
+        if not distinctive and (len(token) < 4 or token.lower() in _GENERIC_TOKENS):
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tokens
+
+
+def _body_texts(result: dict) -> list[str]:
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return []
+    texts: list[str] = []
+    if isinstance(result.get("text"), str):
+        texts.append(result["text"])
+    if isinstance(result.get("stdout"), str):
+        texts.append(result["stdout"])
+    for match in result.get("matches") or []:
+        if isinstance(match, dict) and isinstance(match.get("text"), str):
+            texts.append(match["text"])
+    return texts
+
+
+def _printed_integers(result: dict) -> set[int]:
+    """Integers printed as their own line by a successful python call.
+
+    A number buried in other printed text is handled by contains_number on the result.
+    """
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return set()
+    stdout = result.get("stdout")
+    if not isinstance(stdout, str):
+        return set()
+    found: set[int] = set()
+    lines = stdout.splitlines() or [stdout]
+    for line in lines:
+        stripped = line.strip()
+        if re.fullmatch(r"0|-?[1-9]\d*", stripped):
+            found.add(int(stripped))
+    return found
+
+
+def _line_counts(question: str, result: dict) -> set[int]:
+    """Positive line counts for distinctive tokens from the question. Zero is not support."""
+    texts = _body_texts(result)
+    if not texts:
+        return set()
+    counts: set[int] = set()
+    for token in _support_tokens(question):
+        for text in texts:
+            count = sum(1 for line in text.splitlines() if token in line)
+            if count > 0:
+                counts.add(count)
+    return counts
+
+
+def _cited_result(claim: dict, results: list) -> dict | None:
+    match = re.fullmatch(r"call_(\d+)", claim.get("citation", ""))
+    if not match:
+        return None
+    index = int(match.group(1)) - 1
+    if index < 0 or index >= len(results):
+        return None
+    result = results[index]["result"]
+    if not isinstance(result, dict):
+        return None
+    return result
+
+
+def _value_supported(question: str, value: int, result: dict, blob: str) -> bool:
+    """A cited number is the token itself, a printed python integer, or a matching line count."""
+    if contains_number(blob, value):
+        return True
+    if value in _printed_integers(result):
+        return True
+    return value > 0 and value in _line_counts(question, result)
+
+
 def claims_are_grounded(question: str, claims: list, results: list, answer: str) -> bool:
+    supported: set[str] = set()
     for claim in claims:
-        match = re.fullmatch(r"call_(\d+)", claim.get("citation", ""))
-        if not match:
+        result = _cited_result(claim, results)
+        if result is None:
             return False
-        index = int(match.group(1)) - 1
-        if index < 0 or index >= len(results):
-            return False
-        blob = result_text(results[index]["result"])
-        if "value" in claim and not contains_number(blob, int(claim["value"])):
-            return False
+        blob = result_text(result)
+        if "value" in claim:
+            value = int(claim["value"])
+            if not _value_supported(question, value, result, blob):
+                return False
+            supported.add(_number_token(str(value)))
         if "text" in claim and not _text_in_blob(claim["text"], blob):
             return False
     allowed = {_number_token(token) for token in NUMBER_RE.findall(question)}
+    allowed.update(supported)
     for item in results:
         allowed.update(_number_token(token) for token in NUMBER_RE.findall(result_text(item["result"])))
     return all(_number_token(token) in allowed for token in ANSWER_NUMBER_RE.findall(answer))
@@ -133,8 +336,8 @@ def _history(plan: dict | None, results: list, feedback: str) -> str:
 REPLAY_CLOCK_STEP_SECONDS = 4
 FLIGHT_RULES = {
     "planner": "Return at most four steps using the bundled tools. An empty plan means the corpus cannot answer.",
-    "worker": "One JSON tool call or a final answer. Every claim cites a tool result that contains it.",
-    "critic": "Accept grounded claims. Otherwise revise. At most 2 revise passes, then the gate refuses unsupported claims.",
+    "worker": "One JSON tool call or a final answer. Cite a result that contains the claim, a python call that printed the count, or text with that many matching lines.",
+    "critic": "Reply with one JSON object. Accept grounded claims. Otherwise revise. At most 2 revise passes, then the gate refuses unsupported claims.",
     "max_turns": MAX_TURNS,
     "max_critic_retries": MAX_CRITIC_RETRIES,
     "max_schema_tries": MAX_SCHEMA_TRIES,
@@ -193,9 +396,15 @@ class TeamRun:
             ]
         return None
 
+    def _user(self, rest: str) -> str:
+        block = f"Task: {self.task['question']}\n\n{corpus_guide()}"
+        if rest:
+            block += "\n\n" + rest
+        return block
+
     def _worker_prompt(self, feedback: str) -> list[dict]:
         system = SINGLE_SYSTEM if self.single else WORKER_SYSTEM
-        user = f"Task: {self.task['question']}\n\n{_history(None if self.single else self.plan, self.results, feedback)}"
+        user = self._user(_history(None if self.single else self.plan, self.results, feedback))
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
     def _until_final(self, feedback: str) -> dict | None:
@@ -218,7 +427,7 @@ class TeamRun:
                 "planner",
                 [
                     {"role": "system", "content": PLANNER_SYSTEM},
-                    {"role": "user", "content": "Task: " + self.task["question"]},
+                    {"role": "user", "content": self._user("")},
                 ],
             )
             self.plan = proposal_plan or {"steps": []}
@@ -233,10 +442,8 @@ class TeamRun:
                     {"role": "system", "content": CRITIC_SYSTEM},
                     {
                         "role": "user",
-                        "content": (
-                            f"Task: {self.task['question']}\n\n"
-                            f"{_history(self.plan, self.results, '')}\n\n"
-                            f"Worker final: {dumps(proposal)}"
+                        "content": self._user(
+                            f"{_history(self.plan, self.results, '')}\n\nWorker final: {dumps(proposal)}"
                         ),
                     },
                 ],
