@@ -229,3 +229,125 @@ def check_role(role: str, payload: dict) -> str | None:
 
 def dumps(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+
+
+# ---------------------------------------------------------------------------
+# Team v2: six roles. Each role's tool permissions are explicit and minimal.
+# The v1 schemas above are unchanged.
+# ---------------------------------------------------------------------------
+
+ROLES_V2 = ["commander", "scout", "engineer", "analyst", "critic", "auditor"]
+
+ROLE_TOOLS: dict[str, tuple[str, ...]] = {
+    "commander": (),
+    "scout": ("retrieve", "read_file", "web_search"),
+    "engineer": ("python", "write_file"),
+    "analyst": ("calculator",),
+    "critic": (),
+    "auditor": (),
+}
+
+# Roles the commander can assign a step to.
+SPECIALISTS = ("scout", "engineer", "analyst")
+# Only the analyst, in its drafting turn, writes the final answer.
+ANSWERING_ROLES = ("analyst",)
+
+COMMANDER_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["steps"],
+    "properties": {
+        "steps": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["goal", "role", "tool"],
+                "properties": {
+                    "goal": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "role": {"type": "string", "enum": list(SPECIALISTS)},
+                    "tool": {"type": "string", "enum": TOOL_NAMES},
+                },
+            },
+        }
+    },
+}
+
+
+def role_schema_v2(role: str, *, may_answer: bool = False) -> dict:
+    """The JSON schema for one v2 turn. A specialist step is a tool call from that role's tools only."""
+    if role == "commander":
+        return COMMANDER_SCHEMA
+    if role == "critic":
+        return CRITIC_SCHEMA
+    if role not in SPECIALISTS:
+        raise ValueError(f"{role} does not take a model turn")
+    schema = json.loads(json.dumps(WORKER_SCHEMA))
+    schema["properties"]["tool"]["enum"] = list(ROLE_TOOLS[role])
+    if not (may_answer and role in ANSWERING_ROLES):
+        schema["properties"]["action"]["enum"] = ["tool"]
+    return schema
+
+
+def normalize_payload_v2(role: str, payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    if role == "commander":
+        raw_steps = payload.get("steps")
+        if not isinstance(raw_steps, list):
+            return _known(payload, {"steps"})
+        steps = []
+        for step in raw_steps:
+            if not isinstance(step, dict):
+                steps.append(step)
+                continue
+            cleaned = _known(step, {"goal", "role", "tool"})
+            for key in ("role", "tool"):
+                if isinstance(cleaned.get(key), str):
+                    cleaned[key] = cleaned[key].strip().lower()
+            steps.append(cleaned)
+        return {"steps": steps}
+    if role == "critic":
+        return normalize_payload("critic", payload)
+    return normalize_payload("worker", payload)
+
+
+def _permission_error(role: str, payload: dict, may_answer: bool) -> str | None:
+    action = payload.get("action")
+    if action == "final" and not (may_answer and role in ANSWERING_ROLES):
+        if role in ANSWERING_ROLES:
+            return f"{role} runs a tool on an assigned step; the final answer comes in the drafting turn"
+        return f"{role} cannot give the final answer; reply with one tool call"
+    tool = payload.get("tool")
+    if action == "tool" and isinstance(tool, str) and tool not in ROLE_TOOLS[role]:
+        allowed = ", ".join(ROLE_TOOLS[role])
+        return f"{role} may use only {allowed}; {tool} is not allowed"
+    return None
+
+
+def check_role_v2(role: str, payload: dict, *, may_answer: bool = False) -> str | None:
+    """Validate a v2 turn. Permission errors are reported in words so the repair turn can fix them."""
+    if role == "commander":
+        try:
+            validate(COMMANDER_SCHEMA, payload)
+        except jsonschema.ValidationError as exc:
+            return exc.message
+        for step in payload["steps"]:
+            if step["tool"] not in ROLE_TOOLS[step["role"]]:
+                allowed = ", ".join(ROLE_TOOLS[step["role"]])
+                return f"step {step['goal']!r}: {step['role']} may use only {allowed}"
+        return None
+    if role == "critic":
+        return check_role("critic", payload)
+    if role not in SPECIALISTS:
+        return f"{role} does not take a model turn"
+    if isinstance(payload, dict):
+        denied = _permission_error(role, payload, may_answer)
+        if denied:
+            return denied
+    try:
+        validate(role_schema_v2(role, may_answer=may_answer), payload)
+    except jsonschema.ValidationError as exc:
+        return exc.message
+    return check_worker(payload)

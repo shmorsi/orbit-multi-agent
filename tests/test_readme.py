@@ -43,6 +43,8 @@ def test_readme_numbers_come_from_committed_files():
     result_files = list(Path("results").glob("*.json"))
     result_files.extend(Path("results/v1_qwen0.5b").glob("*.json"))
     result_files.extend(Path("results/v2_qwen1.5b").glob("*.json"))
+    result_files.extend(Path("results/v3_qwen1.5b").glob("*.json"))
+    result_files.extend(Path("results/v3_api").glob("*/*.json"))
     for path in result_files:
         result_numbers |= _json_numbers(path)
     allowed_outside = set(result_numbers)

@@ -6,7 +6,7 @@ A local planner, worker, and critic team that answers questions over a small bun
 
 **Fine-tuning taught the format, not the task.** QLoRA on Qwen2.5-1.5B raised the schema-valid rate from 0.6071428571428571 to 0.7797619047619048 (paired interval above zero), while task success went from 2 of 12 to 3 of 12 with an interval that includes zero. Frozen 12-task test, one score per model, harness v2.
 
-**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [Results](#results) · [Limits](#limits) · [Distill and score notebook](notebooks/run_distill_and_score.ipynb)
+**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [v2: six roles](#v2-six-roles) · [Results](#results) · [Limits](#limits) · [Distill and score notebook](notebooks/run_distill_and_score.ipynb)
 
 ## What it demonstrates
 
@@ -78,6 +78,59 @@ Flight rules, from the code the replay reads:
 - The critic replies with one JSON object. It accepts a grounded claim, including a count printed by python and a count of matching lines in the cited text. Otherwise it revises, at most 2 times, and then the gate refuses unsupported claims.
 - The team stops after 8 turns. A broken schema gets 2 tries on that turn.
 
+## v2: six roles
+
+`--team v2` runs the same tasks, tools, and grounding gate with six seats instead of three. `--team v1` stays the default, so every number on this page is a v1 team result.
+
+```mermaid
+flowchart LR
+  task[Task] --> commander[Commander]
+  commander -->|assign| scout[Scout]
+  commander -->|assign| engineer[Engineer]
+  commander -->|assign| analyst[Analyst]
+  scout --> tools[Tools]
+  engineer --> tools
+  analyst --> tools
+  tools --> analyst
+  analyst -->|draft| critic[Critic]
+  critic -->|revise| analyst
+  critic -->|accept| auditor[Auditor]
+  auditor --> trace[JSONL trace]
+```
+
+| Role | Tools | Can answer |
+| --- | --- | --- |
+| Commander | none; assigns each step to one specialist | no |
+| Scout | retrieve, read_file, web_search | no |
+| Engineer | python, write_file | no |
+| Analyst | calculator | yes, the only seat that drafts the final |
+| Critic | none | no; accepts or sends the draft back, at most 2 times |
+| Auditor | none; read-only copy of the trace | no; refuses any claim or number the tool results do not support |
+
+- Every turn is one JSON object checked against that role's schema. A tool outside the role's list fails validation and never runs.
+- The auditor is code, not a model turn. Its verdict is the v1 grounding gate, and it writes one finding per claim and per number into the trace.
+- The limits are the v1 limits: 8 turns, 2 revise passes, and 2 schema tries on a turn.
+- Every seat calls one interface, `LLMClient.complete(messages, schema)`, in `src/orbit_agents/policy.py`. Backends: scripted, transformers, ollama, llama.cpp, and anthropic. Adding a provider is one class; `OpenAICompatiblePolicy` is the documented stub.
+- The policy sees only the role prompts and the task. It never sees the checker contract the distillation teacher gets, or any frozen-test content.
+
+Offline, with the scripted harness (a harness check, not a model score):
+
+```bash
+python -m orbit_agents.eval.run --team v2 --split test --out traces/v2_check.json
+make traces-v2   # rewrites mission/traces/v2: accept, revise, and an auditor refusal
+```
+
+With Claude as the policy for both teams, so v1 and v2 are compared on the same model:
+
+```bash
+make score-dry-run MODEL=claude-haiku-5-5          # checks the frozen test hash and tag, prints the request bound
+export ORBIT_ANTHROPIC_API_KEY=your-key
+make score-v1 MODEL=claude-haiku-5-5
+make score-v2 MODEL=claude-haiku-5-5
+```
+
+Each target scores the frozen test once and writes `results/v3_api/<model>/team_v1.json` or `team_v2.json`. It refuses a config that is already measured. The request cap and the 5 USD cost stop are the distillation script's. When both files are measured, the paired bootstrap of v2 minus v1 is written next to them, and the README generator adds the rows below. The v2 team has not been scored yet.
+
 ## Results
 
 <!-- RESULTS_START -->
@@ -106,6 +159,7 @@ The harness changed in v3. Search now lists tables and logs, python can read a b
 - The adapter that gained a success also missed a trap: correct refusals went from 2 to 1.
 - The harness changed in v3. The v2 numbers are archived and are not compared with v3 runs. No v3 model score is in yet.
 - Team distill has not been scored. The notebook below is the path to that one score.
+- The v2 team (6 roles) has not been scored. Its traces in `mission/traces/v2/` come from the scripted harness, which follows each task's oracle; they show the protocol, not model skill.
 - The free-T4 wall clock for training plus scoring has not been measured.
 
 ## Distillation
