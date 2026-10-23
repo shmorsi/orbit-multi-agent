@@ -6,6 +6,11 @@ only for files under results/v3_qwen1.5b/ that are measured model evals; a
 missing or pending file renders as "not scored". Paired intervals appear only
 when that directory's comparison.json is measured.
 
+API-policy rows (results/v3_api/<model>/team_v1.json and team_v2.json, written
+once each by `python -m orbit_agents.eval.score_team`) appear only for measured
+files. With none measured, the block is unchanged and the "v2 team (6 roles)"
+row does not exist.
+
     python -m orbit_agents.eval.readme          # rewrite the block
     python -m orbit_agents.eval.readme --check  # fail if the block is stale
 """
@@ -173,9 +178,54 @@ def _v3(root: Path) -> list[str]:
     return lines
 
 
+API_TEAMS = (("team_v1", "v1 team (3 roles)"), ("team_v2", "v2 team (6 roles)"))
+
+
+def _api(root: Path) -> list[str]:
+    folder = root / "results" / "v3_api"
+    if not folder.is_dir():
+        return []
+    lines: list[str] = []
+    for model_dir in sorted(path for path in folder.iterdir() if path.is_dir()):
+        runs = {key: _read(model_dir / f"{key}.json") for key, _label in API_TEAMS}
+        if not any(_measured(payload) for payload in runs.values()):
+            continue
+        model = next(payload["model"] for payload in runs.values() if _measured(payload))
+        lines.extend(
+            [
+                "",
+                (
+                    f"API policy `{model}`, harness v3, frozen test `team-eval-v1`, each team scored once with the same "
+                    f"model and role prompts only. Files: `results/v3_api/{model_dir.name}/`."
+                ),
+                "",
+                *_table_head(),
+            ]
+        )
+        for key, label in API_TEAMS:
+            payload = runs[key]
+            lines.append(_row(label, payload) if _measured(payload) else f"| {label} | not scored | | | |")
+        comparison = _read(model_dir / "comparison.json")
+        lines.append("")
+        pair = None
+        if comparison and comparison.get("status") == "measured":
+            pair = comparison.get("pairs", {}).get("team_v2_minus_team_v1")
+        if pair is None:
+            lines.append("The paired comparison needs both teams measured on this model. It is not in yet, so no difference is claimed.")
+        else:
+            success = pair["task_success_rate"]
+            schema = pair["schema_valid_rate"]
+            lines.append(
+                f"The paired bootstrap for task success, v2 team minus v1 team, is {success['low']} to {success['high']} "
+                f"(point {success['point']}). {_zero(success)} Its schema-valid interval is {schema['low']} to "
+                f"{schema['high']} (point {schema['point']})."
+            )
+    return lines
+
+
 def render(root: Path = ROOT) -> str:
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
-    lines = [START, *_v2(root, distill), "", *_v3(root), END]
+    lines = [START, *_v2(root, distill), "", *_v3(root), *_api(root), END]
     return "\n".join(lines)
 
 
