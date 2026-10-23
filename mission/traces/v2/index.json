@@ -1,0 +1,26 @@
+[
+  {
+    "file": "accept.jsonl",
+    "team": "v2",
+    "task_id": "dev-012",
+    "status": "answer",
+    "outcome": "accept",
+    "question": "For machine printer-a, what is the integer quotient of total minutes divided by the job count?"
+  },
+  {
+    "file": "revise.jsonl",
+    "team": "v2",
+    "task_id": "dev-008",
+    "status": "answer",
+    "outcome": "revise",
+    "question": "How many laser jobs ran longer than the second-person limit written in the laser note?"
+  },
+  {
+    "file": "refuse.jsonl",
+    "team": "v2",
+    "task_id": "dev-009",
+    "status": "refuse",
+    "outcome": "auditor",
+    "question": "For machine printer-a, how many jobs failed, and how many grams did those failed jobs list?"
+  }
+]
