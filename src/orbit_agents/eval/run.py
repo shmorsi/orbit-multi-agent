@@ -8,10 +8,59 @@ from pathlib import Path
 
 from orbit_agents.eval.metrics import summarize
 from orbit_agents.eval.score import score_task
+from orbit_agents.eval.score_team import verify_frozen_test
 from orbit_agents.engine import run_single, run_team
 from orbit_agents.paths import ROOT
 from orbit_agents.scripted import ScriptedBackend
 from orbit_agents.tasks import read_jsonl
+
+# Committed files the generators treat as archived scores, harness checks, or
+# pending placeholders. A new model score does not land in any of these.
+LOCKED_RESULT_FILES = {
+    "results/single_base.json",
+    "results/team_base.json",
+    "results/team_lora.json",
+    "results/team_distill.json",
+    "results/comparison.json",
+    "results/finetune_eval.json",
+    "results/harness_single.json",
+    "results/harness_team.json",
+}
+LOCKED_RESULT_PREFIXES = ("results/v1_", "results/v2_")
+MODEL_NOTE = "One score on the frozen test."
+HARNESS_NOTE = "A system_check replays the scripted harness. It is not a language-model score."
+
+
+def result_relative(path: Path, root: Path = ROOT) -> str | None:
+    candidate = path if path.is_absolute() else root / path
+    try:
+        return candidate.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def locked_result_reason(path: Path, root: Path = ROOT) -> str | None:
+    """Refuse writes onto archived scores, harness checks, and pending placeholders."""
+    relative = result_relative(path, root)
+    if relative is None:
+        return None
+    if relative in LOCKED_RESULT_FILES or relative.startswith(LOCKED_RESULT_PREFIXES):
+        return (
+            f"{relative} is an archived result, a harness check, or a pending placeholder. "
+            "A new model score goes under results/v3_qwen1.5b/ or results/v3_api/<model>/."
+        )
+    return None
+
+
+def measured_model_eval(path: Path, root: Path = ROOT) -> bool:
+    candidate = path if path.is_absolute() else root / path
+    if not candidate.is_file():
+        return False
+    try:
+        payload = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return payload.get("status") == "measured" and payload.get("kind") == "model_eval"
 
 SPLITS = {
     "dev": ROOT / "eval" / "dev.jsonl",
@@ -87,6 +136,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.split == "test":
+        verify_frozen_test(ROOT)
+    locked = locked_result_reason(args.out)
+    if locked:
+        raise SystemExit(locked)
+    if args.split == "test" and measured_model_eval(args.out):
+        raise SystemExit(f"{args.out} is already measured. The frozen test is scored once per config.")
     tasks = load_tasks(args.split)
     kind = "system_check" if args.backend == "scripted" else "model_eval"
     if args.team == "v2":
@@ -121,7 +177,7 @@ def main(argv: list[str] | None = None) -> None:
         "adapter": args.adapter,
         **summary,
         "per_task": rows,
-        "note": "A system_check replays the scripted harness. It is not a language-model score.",
+        "note": MODEL_NOTE if kind == "model_eval" else HARNESS_NOTE,
     }
     if args.team == "v2":
         report["team"] = "v2"

@@ -4,9 +4,20 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -14,8 +25,9 @@ jobs:
           fetch-tags: true
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install
+        # The suite is the scripted harness. Torch and the Colab pins are not required here.
         run: pip install -e ".[dev]"
       - name: Leakage check
         run: python finetune/leakage.py

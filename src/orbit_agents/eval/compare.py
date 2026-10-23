@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from orbit_agents.eval.metrics import bootstrap_mean_difference
+from orbit_agents.eval.run import locked_result_reason
 
 KEYS = {
     "task_success_rate": "success",
@@ -70,6 +71,9 @@ def main(argv: list[str] | None = None) -> None:
     paths = {"single_base": args.single, "team_base": args.team, "team_lora": args.lora}
     if args.distill is not None:
         paths["team_distill"] = args.distill
+    locked = locked_result_reason(args.out)
+    if locked:
+        raise SystemExit(locked)
     try:
         report = compare(paths)
     except SystemExit as exc:

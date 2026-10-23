@@ -119,6 +119,37 @@ def test_team_distill_pairs_extend_the_original_comparison(tmp_path):
     }
 
 
+def test_scorer_refuses_locked_and_already_measured_outputs(tmp_path):
+    from orbit_agents.eval.compare import main as compare_main
+    from orbit_agents.eval.run import main
+
+    before_placeholder = Path("results/single_base.json").read_text(encoding="utf-8")
+    with pytest.raises(SystemExit, match="pending placeholder"):
+        main(["--split", "tune", "--backend", "scripted", "--out", "results/single_base.json"])
+    assert Path("results/single_base.json").read_text(encoding="utf-8") == before_placeholder
+    with pytest.raises(SystemExit, match="archived result"):
+        main(["--split", "tune", "--backend", "scripted", "--out", "results/v2_qwen1.5b/team_base.json"])
+    with pytest.raises(SystemExit, match="pending placeholder"):
+        compare_main(
+            [
+                "--single",
+                "results/v2_qwen1.5b/single_base.json",
+                "--team",
+                "results/v2_qwen1.5b/team_base.json",
+                "--lora",
+                "results/v2_qwen1.5b/team_lora.json",
+                "--out",
+                "results/comparison.json",
+            ]
+        )
+    measured = tmp_path / "team_base.json"
+    measured.write_text(Path("results/v2_qwen1.5b/team_base.json").read_text(encoding="utf-8"), encoding="utf-8")
+    before = measured.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit, match="already measured"):
+        main(["--split", "test", "--backend", "scripted", "--out", str(measured)])
+    assert measured.read_text(encoding="utf-8") == before
+
+
 def test_model_files_are_pending():
     for name in ("single_base.json", "team_base.json", "team_lora.json", "comparison.json", "finetune_eval.json"):
         payload = json.loads(Path("results", name).read_text(encoding="utf-8"))

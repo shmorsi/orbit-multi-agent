@@ -34,6 +34,9 @@ def test_page_has_playback_and_reduced_motion():
     assert "team distill" in html.lower()
     assert "prefers-reduced-motion" in css
     assert "/api/run" in script
+    assert "traces/v2/index.json" in script
+    assert "Team v2, six roles" in script
+    assert 'data-phase="auditor"' in html
     assert "Inter Tight" in css
     assert Path("mission/fonts/inter-tight-latin.woff2").stat().st_size > 1000
     assert "SIL OPEN FONT LICENSE" in Path("mission/fonts/OFL.txt").read_text(encoding="utf-8")

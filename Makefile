@@ -29,10 +29,18 @@ score-dry-run:
 	$(PYTHON) -m orbit_agents.eval.score_team --team v2 --provider $(PROVIDER) --model $(MODEL) --dry-run
 
 score-v1:
+	@if [ "$(PROVIDER)" = "anthropic" ] && [ -z "$$ORBIT_ANTHROPIC_API_KEY" ]; then \
+	  echo "Set ORBIT_ANTHROPIC_API_KEY to an Anthropic API key. Nothing is read from a file. make score-dry-run does not need a key." >&2; \
+	  exit 1; \
+	fi
 	$(PYTHON) -m orbit_agents.eval.score_team --team v1 --provider $(PROVIDER) --model $(MODEL) --max-cost-usd $(MAX_COST_USD)
 	$(PYTHON) -m orbit_agents.eval.readme
 
 score-v2:
+	@if [ "$(PROVIDER)" = "anthropic" ] && [ -z "$$ORBIT_ANTHROPIC_API_KEY" ]; then \
+	  echo "Set ORBIT_ANTHROPIC_API_KEY to an Anthropic API key. Nothing is read from a file. make score-dry-run does not need a key." >&2; \
+	  exit 1; \
+	fi
 	$(PYTHON) -m orbit_agents.eval.score_team --team v2 --provider $(PROVIDER) --model $(MODEL) --max-cost-usd $(MAX_COST_USD)
 	$(PYTHON) -m orbit_agents.eval.readme
 

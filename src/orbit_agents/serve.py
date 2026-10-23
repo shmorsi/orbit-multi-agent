@@ -6,7 +6,6 @@ import json
 import queue
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import urlparse
 
 from orbit_agents.engine import run_team

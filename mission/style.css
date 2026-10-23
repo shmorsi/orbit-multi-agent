@@ -13,6 +13,9 @@
   --planner: #d7e6ff;
   --worker: #f2c14e;
   --critic: #ff6b5a;
+  --scout: #7fd6c2;
+  --analyst: #c7a6ff;
+  --auditor: #f4f4f4;
   --bg: #000;
 }
 
@@ -294,6 +297,21 @@ body.success .orbit i { filter: drop-shadow(0 0 12px rgba(215, 230, 255, 0.7)); 
 .seat.lit.worker { box-shadow: 0 0 36px rgba(242, 193, 78, 0.75), inset 0 0 16px rgba(242, 193, 78, 0.22); border-color: var(--worker); }
 .seat.lit.critic { box-shadow: 0 0 36px rgba(255, 107, 90, 0.7), inset 0 0 16px rgba(255, 107, 90, 0.2); border-color: var(--critic); }
 
+.seat[hidden] { display: none; }
+.seat.v2 { width: 92px; height: 92px; transform: translate(-50%, -50%); font-size: 10px; letter-spacing: 0.14em; z-index: 2; }
+.seat.v2.commander { --seat-c: var(--planner); color: var(--planner); }
+.seat.v2.scout { --seat-c: var(--scout); color: var(--scout); }
+.seat.v2.engineer { --seat-c: var(--worker); color: var(--worker); }
+.seat.v2.analyst { --seat-c: var(--analyst); color: var(--analyst); }
+.seat.v2.critic { --seat-c: var(--critic); color: var(--critic); }
+.seat.v2.auditor { --seat-c: var(--auditor); color: var(--auditor); border-style: dashed; }
+.seat.v2.lit { border-color: var(--seat-c); box-shadow: 0 0 30px color-mix(in srgb, var(--seat-c) 70%, transparent), inset 0 0 14px color-mix(in srgb, var(--seat-c) 22%, transparent); }
+.seat.v2.auditor[data-verdict="pass"] { border-style: solid; border-color: var(--planner); }
+.seat.v2.auditor[data-verdict="refuse"] { border-style: solid; border-color: var(--critic); color: var(--critic); }
+body[data-team="v2"] .ring { inset: 24%; }
+body[data-team="v2"] .phases { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+body[data-team="v2"] .dock { top: 10px; bottom: auto; }
+
 .pulse {
   position: absolute;
   width: 9px;
@@ -488,6 +506,8 @@ textarea { min-height: 72px; resize: vertical; grid-column: 1 / -1; }
   .meters { gap: 16px; }
   .stage { width: min(420px, 86vw); }
   .seat { width: 76px; height: 76px; }
+  .seat.v2 { width: 58px; height: 58px; font-size: 8px; letter-spacing: 0.08em; }
+  .seat.v2 small { font-size: 7px; margin-top: 2px; letter-spacing: 0.08em; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -536,6 +556,8 @@ body.record .live { display: none; }
 .phases li[data-phase="worker"].on { color: var(--worker); }
 .phases li[data-phase="tool"].on { color: var(--worker); }
 .phases li[data-phase="critic"].on { color: var(--critic); }
+.phases li[data-phase="auditor"].on { color: var(--auditor); }
+.phases li[hidden] { display: none; }
 
 .hud {
   position: absolute;

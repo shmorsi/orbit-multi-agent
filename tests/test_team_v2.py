@@ -207,6 +207,9 @@ def test_anthropic_policy_needs_the_env_key(monkeypatch):
     monkeypatch.delenv("ORBIT_ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(SystemExit, match="ORBIT_ANTHROPIC_API_KEY"):
         AnthropicPolicy("claude-haiku-5-5", max_requests=5, max_cost_usd=1)
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+    assert "ORBIT_ANTHROPIC_API_KEY" in makefile
+    assert "make score-dry-run does not need a key" in makefile
 
 
 def _anthropic_reply(text):
