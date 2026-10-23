@@ -22,7 +22,7 @@ from orbit_agents.engine import (
 )
 from orbit_agents.prompts import ROLE_PROMPTS_V2, ROLE_PROMPTS_V3
 from orbit_agents.schema import ROLE_TOOLS_V3, ROLES_V3, check_role_v3, dumps, normalize_payload_v2, role_schema_v3
-from orbit_agents.team_v2 import TEAM_V2, TeamV2Run, TraceView, audit
+from orbit_agents.team_v2 import FLIGHT_RULES_V2, TEAM_V2, TeamV2Run, TraceView, audit
 from orbit_agents.tools import call_tool
 
 TEAM_V3 = "v3"
@@ -34,6 +34,11 @@ FLIGHT_RULES_V3 = {
     "roles": list(ROLES_V3),
     "builds_on": TEAM_V2,
     "permissions": {role: list(tools) for role, tools in ROLE_TOOLS_V3.items()},
+    "commander": "Assigns at most four steps to the researcher, scout, engineer, or analyst. An empty plan means the corpus cannot answer.",
+    "scout": FLIGHT_RULES_V2["scout"],
+    "engineer": FLIGHT_RULES_V2["engineer"],
+    "analyst": FLIGHT_RULES_V2["analyst"],
+    "critic": FLIGHT_RULES_V2["critic"],
     "coordinator": "Opens the round table. No tools and no answer.",
     "researcher": "Reads the corpus with retrieve, read_file, or web_search. Cannot run code or answer.",
     "redteam": "Proposes one unsupported claim. That claim is not the team's answer.",

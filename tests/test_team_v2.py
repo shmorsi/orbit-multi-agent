@@ -205,8 +205,11 @@ def test_providers_include_anthropic_and_the_extension_point_is_a_stub():
 
 def test_anthropic_policy_needs_the_env_key(monkeypatch):
     monkeypatch.delenv("ORBIT_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(SystemExit, match="ORBIT_ANTHROPIC_API_KEY"):
         AnthropicPolicy("claude-haiku-5-5", max_requests=5, max_cost_usd=1)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    AnthropicPolicy("claude-haiku-5-5", max_requests=5, max_cost_usd=1, transport=lambda *args: None)
     makefile = Path("Makefile").read_text(encoding="utf-8")
     assert "ORBIT_ANTHROPIC_API_KEY" in makefile
     assert "make score-dry-run does not need a key" in makefile

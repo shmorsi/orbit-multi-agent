@@ -54,6 +54,8 @@ The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were 2 of 12, 2 of 
 The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config. It has not been scored.
 
 The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
+
+The round-table team is not scored.
 <!-- RESULTS_END -->
 
 ![Mission Control replaying a saved trace, with the frozen-test flight data underneath](docs/mission-board.png)

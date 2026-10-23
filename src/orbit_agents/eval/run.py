@@ -118,6 +118,26 @@ def execute_v2(
     return rows
 
 
+def execute_v3(
+    tasks: list[dict], *, backend_name: str, model: str, adapter: str | None, max_new_tokens: int, workspace: Path
+) -> list[dict]:
+    """The round table. Same tools, gate, and scorer as v2. A system check, not an API score."""
+    from orbit_agents.policy import LegacyBackendPolicy
+    from orbit_agents.scripted_v3 import ScriptedPolicyV3
+    from orbit_agents.team_v3 import run_team_v3
+
+    shared = None
+    if backend_name != "scripted":
+        shared = LegacyBackendPolicy(
+            load_backend(backend_name, tasks[0], model, adapter, max_new_tokens), provider=backend_name, model=model
+        )
+    rows = []
+    for task in tasks:
+        policy = shared or ScriptedPolicyV3(task)
+        rows.append(score_task(task, run_team_v3(task, policy, workspace / task["id"])))
+    return rows
+
+
 def execute(
     tasks: list[dict],
     *,
@@ -146,7 +166,12 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Score Orbit on a frozen split")
     parser.add_argument("--split", choices=("dev", "tune", "test"), default="test")
     parser.add_argument("--mode", choices=["team", "single"], default="team")
-    parser.add_argument("--team", choices=["v1", "v2"], default="v1", help="v1: planner, worker, critic. v2: six roles")
+    parser.add_argument(
+        "--team",
+        choices=["v1", "v2", "v3"],
+        default="v1",
+        help="v1: planner, worker, critic. v2: six roles. v3: round table",
+    )
     parser.add_argument("--backend", choices=["scripted", "transformers", "ollama", "llamacpp"], default="scripted")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
     parser.add_argument("--adapter", default=None)
@@ -173,6 +198,17 @@ def main(argv: list[str] | None = None) -> None:
             max_new_tokens=args.max_new_tokens,
             workspace=ROOT / "traces" / "eval" / "team_v2" / args.backend,
         )
+    elif args.team == "v3":
+        if args.mode != "team":
+            raise SystemExit("--team v3 is a team; --mode single is the v1 baseline")
+        rows = execute_v3(
+            tasks,
+            backend_name=args.backend,
+            model=args.model,
+            adapter=args.adapter,
+            max_new_tokens=args.max_new_tokens,
+            workspace=ROOT / "traces" / "eval" / "team_v3" / args.backend,
+        )
     else:
         rows = execute(
             tasks,
@@ -188,7 +224,7 @@ def main(argv: list[str] | None = None) -> None:
         "status": "measured",
         "kind": kind,
         "split": args.split,
-        "mode": args.mode if args.team == "v1" else "team_v2",
+        "mode": args.mode if args.team == "v1" else f"team_{args.team}",
         "backend": args.backend,
         "model": None if args.backend == "scripted" else args.model,
         "adapter": args.adapter,
@@ -196,8 +232,8 @@ def main(argv: list[str] | None = None) -> None:
         "per_task": rows,
         "note": MODEL_NOTE if kind == "model_eval" else HARNESS_NOTE,
     }
-    if args.team == "v2":
-        report["team"] = "v2"
+    if args.team != "v1":
+        report["team"] = args.team
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"out": str(args.out), "kind": kind, "n_success": summary["n_success"], "n_tasks": summary["n_tasks"]}))

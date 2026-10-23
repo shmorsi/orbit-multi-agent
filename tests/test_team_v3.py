@@ -4,6 +4,7 @@ The scripted policy is a harness. It is not a model score.
 """
 
 import json
+from pathlib import Path
 
 from orbit_agents.engine import MAX_TURNS
 from orbit_agents.eval.score import score_task
@@ -112,3 +113,62 @@ def test_red_team_claim_is_refused_in_code_and_left_out_of_the_answer(tmp_path):
     assert result.status == "answer"
     assert all(claim.get("value") != PLANTED_VALUE for claim in result.claims)
     assert result.gate_overrode is False
+
+
+def test_committed_v3_traces_match_the_engine(tmp_path):
+    from orbit_agents.trace import bundled_traces_v3
+
+    written = bundled_traces_v3(tmp_path)
+    assert [path.name for path in written] == ["accept.jsonl", "revise.jsonl", "refuse.jsonl"]
+    statuses = {}
+    for path in written:
+        committed = Path("mission/traces/v3") / path.name
+        assert path.read_bytes() == committed.read_bytes()
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        header = rows[0]
+        assert header["team"] == "v3"
+        assert header["fabricated"] is False
+        assert header["harness"] == "scripted_harness"
+        assert any(event["kind"] == "gate" and event["code_verdict"] == "refuse" for event in rows[1:])
+        statuses[path.name] = (header["status"], header["n_retries"], header["gate_overrode"])
+    assert statuses["accept.jsonl"] == ("answer", 0, False)
+    assert statuses["revise.jsonl"] == ("answer", 1, False)
+    assert statuses["refuse.jsonl"] == ("refuse", 0, True)
+    index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
+    assert index == json.loads(Path("mission/traces/v3/index.json").read_text(encoding="utf-8"))
+    assert any(row["task_id"] == "dev-006" for row in index)
+
+
+def test_eval_run_team_v3_is_a_system_check(tmp_path):
+    from orbit_agents.eval.run import main
+
+    out = tmp_path / "v3.json"
+    main(["--team", "v3", "--split", "dev", "--out", str(out)])
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["kind"] == "system_check"
+    assert report["team"] == "v3"
+    assert report["n_success"] == report["n_tasks"]
+
+
+def test_score_v3_dry_run_writes_nothing_and_counts_round_turns(tmp_path):
+    import shutil
+
+    from orbit_agents.eval.score_team import main, request_bound
+
+    root = tmp_path / "repo"
+    (root / "eval").mkdir(parents=True)
+    for name in ("manifest.json", "test.jsonl"):
+        shutil.copy(Path("eval") / name, root / "eval" / name)
+    plan = main(["--team", "v3", "--model", "claude-haiku-5-5", "--root", str(root), "--dry-run"])
+    assert plan["requests"] == request_bound(12, ROUND_TURNS)
+    assert plan["requests"]["max_turn_requests"] == 12 * (MAX_TURNS + ROUND_TURNS)
+    assert plan["label"] == "Round-table team"
+    assert not (root / "results").exists()
+
+
+def test_readme_names_the_round_table_as_not_scored():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    block = readme.split("<!-- RESULTS_START -->", 1)[1].split("<!-- RESULTS_END -->", 1)[0]
+    assert "The round-table team is not scored." in block
+    assert "Those v3 scores are not in yet." in block
+    assert "Round-table team |" not in block

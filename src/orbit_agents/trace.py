@@ -39,6 +39,12 @@ def mission_header(task: dict, result, *, harness: str | None = None, team: str 
         header["team"] = "v2"
         header["flight_rules"] = FLIGHT_RULES_V2
         header["n_audit_refusals"] = 1 if result.gate_overrode else 0
+    elif team == "v3":
+        from orbit_agents.team_v3 import FLIGHT_RULES_V3
+
+        header["team"] = "v3"
+        header["flight_rules"] = FLIGHT_RULES_V3
+        header["n_audit_refusals"] = 1 if result.gate_overrode else 0
     if harness:
         header["harness"] = harness
     return header
@@ -143,14 +149,74 @@ def bundled_traces_v2(directory: Path | None = None) -> list[Path]:
     return written
 
 
+TRACE_DIR_V3 = TRACE_DIR / "v3"
+V3_EXAMPLES = (
+    ("accept.jsonl", "dev-006", "accept"),
+    ("revise.jsonl", "dev-008", "revise"),
+    ("refuse.jsonl", "dev-009", "auditor"),
+)
+
+
+def write_trace_v3(path: Path, task: dict, policy, *, harness: str | None = None) -> Path:
+    """Run the round table and write its JSONL."""
+    from orbit_agents.team_v3 import run_team_v3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workspace = path.parent / ".runs" / path.stem
+    result = run_team_v3(task, policy, workspace)
+    path.write_text(dump_trace(task, result, harness=harness, team="v3"), encoding="utf-8")
+    return path
+
+
+def _v3_policy(kind: str, task: dict):
+    from orbit_agents.scripted_v3 import AuditorCatchV3, ReviseOnceV3, ScriptedPolicyV3
+
+    if kind == "revise":
+        return ReviseOnceV3(task)
+    if kind == "auditor":
+        return AuditorCatchV3(task, AUDITOR_EXTRA_NUMBER)
+    return ScriptedPolicyV3(task)
+
+
+def bundled_traces_v3(directory: Path | None = None) -> list[Path]:
+    """Real round-table engine runs under the scripted harness."""
+    directory = directory or TRACE_DIR_V3
+    directory.mkdir(parents=True, exist_ok=True)
+    by_id = {task["id"]: task for task in all_tasks()}
+    written = []
+    index = []
+    for name, task_id, kind in V3_EXAMPLES:
+        task = by_id[task_id]
+        path = write_trace_v3(directory / name, task, _v3_policy(kind, task), harness="scripted_harness")
+        header = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+        written.append(path)
+        index.append(
+            {
+                "file": path.name,
+                "team": "v3",
+                "task_id": header["task_id"],
+                "status": header["status"],
+                "outcome": kind,
+                "question": header["question"],
+            }
+        )
+    (directory / "index.json").write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    return written
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Rewrite the bundled traces for v1 or v2."""
+    """Rewrite the bundled traces for v1, v2, or the round table."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Rewrite the bundled scripted-harness traces")
-    parser.add_argument("--team", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--team", choices=("v1", "v2", "v3"), default="v1")
     args = parser.parse_args(argv)
-    paths = bundled_traces_v2() if args.team == "v2" else bundled_traces()
+    if args.team == "v3":
+        paths = bundled_traces_v3()
+    elif args.team == "v2":
+        paths = bundled_traces_v2()
+    else:
+        paths = bundled_traces()
     for path in paths:
         print(path)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from orbit_agents.schema import ROLE_TOOLS_V3
-from orbit_agents.scripted_v2 import ScriptedPolicyV2, commander_steps
+from orbit_agents.scripted_v2 import AuditorCatch, ReviseOnceV2, ScriptedPolicyV2, commander_steps
 
 # A count no makerspace tool result contains. The gate must refuse it.
 PLANTED_VALUE = 1_000_000_000
@@ -65,3 +65,35 @@ class ScriptedPolicyV3(ScriptedPolicyV2):
         if role == "verifier":
             return json.dumps(self.verifier())
         return super().complete_text(messages, schema, role=role)
+
+
+class ReviseOnceV3(ScriptedPolicyV3):
+    """First draft is wrong. The critic sends it back once. The red-team claim stays out of the answer."""
+
+    def __init__(self, task: dict):
+        super().__init__(task)
+        self._revise = ReviseOnceV2(task)
+
+    def final(self) -> dict:
+        """The v2 revise-once draft."""
+        return self._revise.final()
+
+    def critic(self) -> dict:
+        """Revise once, then accept."""
+        return self._revise.critic()
+
+
+class AuditorCatchV3(ScriptedPolicyV3):
+    """The critic accepts an extra figure. The auditor refuses it. The red-team claim is separate."""
+
+    def __init__(self, task: dict, extra_number: int):
+        super().__init__(task)
+        self._catch = AuditorCatch(task, extra_number)
+
+    def final(self) -> dict:
+        """Oracle claims, plus a figure no tool produced."""
+        return self._catch.final()
+
+    def critic(self) -> dict:
+        """Accept, so only the auditor can catch the extra figure."""
+        return self._catch.critic()
