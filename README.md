@@ -1,16 +1,44 @@
+# Orbit
+
+A local planner, worker, and critic team that answers questions over a small bundled corpus with JSON-schema tool calls, and refuses any claim its tools do not support.
+
+[![check](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml)
+
+**Fine-tuning taught the format, not the task.** QLoRA on Qwen2.5-1.5B raised the schema-valid rate from 0.6071428571428571 to 0.7797619047619048 (paired interval above zero), while task success went from 2 of 12 to 3 of 12 with an interval that includes zero. Frozen 12-task test, one score per model, harness v2.
+
+**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [Results](#results) · [Limits](#limits) · [Distill and score notebook](notebooks/run_distill_and_score.ipynb)
+
+## What it demonstrates
+
+- **Tool use under a schema.** Every planner, worker, and critic turn is one JSON object checked against its role schema. Six sandboxed tools; nothing in the tool path opens a socket.
+- **A grounding gate.** A claim survives only if the cited tool result contains it, a python call printed it, or it equals the count of matching lines in the cited text. Anything else is refused.
+- **A frozen, honest evaluation.** 12 test tasks (2 traps) hashed and tagged as `team-eval-v1`, a leakage check that keeps them out of training, one score per model, and paired bootstrap intervals. Negative results stay in.
+- **A fine-tuning study.** QLoRA on templated dialogs, plus a teacher-distillation path with hard request and cost caps.
+
 ![Mission Control replaying a trace, with the frozen-test flight data underneath](docs/mission-board.png)
 
 <video src="docs/mission-control.mp4" controls muted playsinline></video>
 
 ![Mission Control replaying a saved engine trace](docs/mission-control.gif)
 
-# Orbit
+## Quickstart
 
-Orbit is a local planner, worker, and critic over a fictional makerspace corpus. The worker calls tools. The critic sends a bad claim back. A gate keeps a claim when the cited tool result contains it, when a successful python call printed the count, or when the count equals the number of lines in the cited text that contain a token from the question. Otherwise the gate refuses the claim. Mission Control replays the JSONL trace, including a task you start on your own machine.
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+make setup && make doctor   # install, then time the scripted harness
+make test                   # the test suite
+make demo                   # Mission Control on localhost
+```
+
+Platform notes (M1, Linux, Windows) and what you should see are in [Run it locally](#run-it-locally).
+
+## How it works
+
+Orbit runs over a fictional makerspace corpus. The worker calls tools. The critic sends a bad claim back. A gate keeps a claim when the cited tool result contains it, when a successful python call printed the count, or when the count equals the number of lines in the cited text that contain a token from the question. Otherwise the gate refuses the claim. Mission Control replays the JSONL trace, including a task you start on your own machine.
 
 The measured 1.5B QLoRA run learned the answer format. On the frozen 12-task test it did not produce a task-success gain this sample can support. The paired interval for task success includes zero. That is the result, and the page says so.
 
-## Architecture
+### Architecture
 
 ```mermaid
 flowchart LR
@@ -30,7 +58,7 @@ The teacher pass sits beside that loop. It never sees the frozen test.
 
 ```mermaid
 flowchart LR
-  pool[Train and tune tasks] --> teacher[Gemini teacher]
+  pool[Train and tune tasks] --> teacher[Claude or Gemini teacher]
   teacher --> sandbox[Local tool sandbox]
   sandbox --> teacher
   teacher --> keep[Checker and schema filter]
@@ -41,7 +69,7 @@ flowchart LR
   student --> score[One frozen score]
 ```
 
-The tools are a sandboxed Python cell that reads a bundled table or file by path, a calculator, corpus file read, a per-run file write, keyword retrieval over the bundled notes, tables, and logs, and an offline web cache. Nothing in the tool path opens a socket. The teacher script is the only piece that calls Gemini, and only with a train or tune prompt.
+The tools are a sandboxed Python cell that reads a bundled table or file by path, a calculator, corpus file read, a per-run file write, keyword retrieval over the bundled notes, tables, and logs, and an offline web cache. Nothing in the tool path opens a socket. The teacher script is the only piece that calls a model API (Claude by default, or Gemini), and only with a train or tune prompt.
 
 Flight rules, from the code the replay reads:
 
@@ -70,6 +98,15 @@ The placeholder files at the top of `results/` stay pending. A harness file in `
 
 The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
 <!-- RESULTS_END -->
+
+## Limits
+
+- The frozen test is 12 tasks, 2 of them traps. One task moves a rate by a twelfth, so only large effects can clear zero.
+- Each model was trained once and scored once. There is no seed sweep.
+- The adapter that gained a success also missed a trap: correct refusals went from 2 to 1.
+- The harness changed in v3. The v2 numbers are archived and are not compared with v3 runs. No v3 model score is in yet.
+- Team distill has not been scored. The notebook below is the path to that one score.
+- The free-T4 wall clock for training plus scoring has not been measured.
 
 ## Distillation
 
@@ -109,7 +146,7 @@ Gemini is still available. Pass `--provider gemini` and set `ORBIT_TEACHER_API_K
 
 Train the student with `finetune/configs/qlora_distill.json`. In Colab, set `ORBIT_DISTILL=1` before the distillation cell in `finetune/colab_train.ipynb`. That cell trains the distill config and scores `team_distill` once. The harness is now v3, so a fair comparison needs a fresh score of single_base, team_base, team_lora, and team_distill on the frozen test. Set `ORBIT_RESCORE=1` before the rescore cell. That cell does not train. It writes the four scores once under `results/v3_qwen1.5b/`. The v2 numbers stay archived in `results/v2_qwen1.5b/`. The comparison adds the distill pairs only when that file is present. Do not score the frozen test in a loop.
 
-## Quickstart
+## Run it locally
 
 Python 3.11 or newer. The demo target is an 8 GB machine with the 0.5B model. The 1.5B model is slow on that machine but can run in fp16. QLoRA and bitsandbytes are CUDA-only. `make setup` does not install them, and the demo never imports them.
 
@@ -184,6 +221,12 @@ On a free T4, open `finetune/colab_train.ipynb` and run it from the top. The def
 `finetune/configs/qlora_small.json` is the 0.5B config from the measured v1 run. `--method lora` is the MPS or CPU training path. On an M1, prefer that 0.5B config or Ollama.
 
 Do not score the frozen test in a loop. A new model gets one frozen score. Iterate on the tune split with `python -m orbit_agents.eval.run --split tune`.
+
+### Distill and score in one notebook
+
+[`notebooks/run_distill_and_score.ipynb`](notebooks/run_distill_and_score.ipynb) runs the team-distill path end to end on a free T4: the Claude teacher (`claude-haiku-5-5` by default, `claude-sonnet-5-5` as an option) under the same request cap and cost stop, QLoRA with `finetune/configs/qlora_distill.json`, one frozen score into `results/v3_qwen1.5b/team_distill.json`, the v3 baselines it needs (each once, skipped if present), the paired comparison, and a regenerated README results block. Add the key as a Colab secret named `ORBIT_ANTHROPIC_API_KEY` before running. It is read from secrets or the environment and never printed.
+
+The results block above is written by `python -m orbit_agents.eval.readme` from the files in `results/`. `--check` fails when the README and the files disagree, and the test suite runs that check.
 
 ## What I built
 
