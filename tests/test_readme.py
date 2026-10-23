@@ -68,3 +68,31 @@ def test_readme_numbers_come_from_committed_files():
     assert team["metrics"] is None
     assert finetune["metrics"] is None
     assert "%" not in results_text
+
+
+def test_results_block_matches_the_generator():
+    from orbit_agents.eval.readme import render, updated_readme
+
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert updated_readme() == readme, "run python -m orbit_agents.eval.readme"
+    assert "| Team distill | not scored | | | |" in render()
+
+
+def test_generator_adds_measured_v3_rows_only(tmp_path):
+    import shutil
+
+    from orbit_agents.eval.readme import render
+
+    for name in ("v1_qwen0.5b", "v2_qwen1.5b"):
+        shutil.copytree(Path("results") / name, tmp_path / "results" / name)
+    v3 = tmp_path / "results" / "v3_qwen1.5b"
+    v3.mkdir()
+    assert "Those v3 scores are not in yet." in render(tmp_path)
+    measured = json.loads(Path("results/v2_qwen1.5b/team_base.json").read_text(encoding="utf-8"))
+    (v3 / "team_distill.json").write_text(json.dumps(measured), encoding="utf-8")
+    (v3 / "team_base.json").write_text(json.dumps({"status": "pending", "kind": "model_eval"}), encoding="utf-8")
+    block = render(tmp_path)
+    assert "| Team distill | 2 of 12 |" in block
+    assert "| Team base | not scored | | | |" in block
+    assert "no v3 difference is claimed" in block
+    assert "scored only under harness v3 below" in block

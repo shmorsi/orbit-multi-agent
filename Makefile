@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: setup demo doctor doctor-live traces test check finetune-data finetune-dry-run
+.PHONY: setup demo doctor doctor-live traces test check readme finetune-data finetune-dry-run distill-dry-run
 
 setup:
 	$(PYTHON) -m pip install -e ".[dev]" -r requirements-infer.txt
@@ -21,6 +21,9 @@ test:
 	$(PYTHON) -m pytest
 
 check: test
+
+readme:
+	$(PYTHON) -m orbit_agents.eval.readme
 
 finetune-data:
 	$(PYTHON) finetune/generate_data.py
