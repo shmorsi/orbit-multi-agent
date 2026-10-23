@@ -224,12 +224,14 @@ def _api(root: Path) -> list[str]:
 
 
 def render(root: Path = ROOT) -> str:
+    """Render the Key results block from the committed result files."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
     lines = [START, *_v2(root, distill), "", *_v3(root), *_api(root), END]
     return "\n".join(lines)
 
 
 def updated_readme(root: Path = ROOT) -> str:
+    """Return README.md with the Key results block replaced by render()."""
     text = (root / "README.md").read_text(encoding="utf-8")
     if not BLOCK_RE.search(text):
         raise SystemExit("README.md has no RESULTS_START/RESULTS_END block")
@@ -238,6 +240,7 @@ def updated_readme(root: Path = ROOT) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Rewrite or check the Key results block."""
     parser = argparse.ArgumentParser(description="Write the README results block from results/")
     parser.add_argument("--check", action="store_true", help="Fail if README.md does not match the results files")
     parser.add_argument("--root", type=Path, default=ROOT)

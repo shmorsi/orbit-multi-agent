@@ -51,6 +51,7 @@ def request_bound(n_tasks: int) -> dict:
 
 
 def verify_frozen_test(root: Path = ROOT) -> dict:
+    """Check eval/test.jsonl against the manifest and, when present, the git tag."""
     manifest = json.loads((root / "eval" / "manifest.json").read_text(encoding="utf-8"))
     body = (root / "eval" / "test.jsonl").read_bytes()
     digest = hashlib.sha256(body).hexdigest()
@@ -70,12 +71,14 @@ def verify_frozen_test(root: Path = ROOT) -> dict:
 
 
 def output_path(root: Path, team: str, model: str) -> Path:
+    """Where one API team score is written, under results/v3_api."""
     if not model or not all(char.isalnum() or char in "._-" for char in model):
         raise SystemExit(f"refusing model name {model!r}")
     return root / API_RESULTS / model / f"team_{team}.json"
 
 
 def is_measured(path: Path) -> bool:
+    """True when the file exists and is a measured model eval."""
     if not path.is_file():
         return False
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -134,6 +137,7 @@ def write_comparison(folder: Path) -> Path | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Argument parser for one frozen API score."""
     parser = argparse.ArgumentParser(description="Score one team once on the frozen test")
     parser.add_argument("--team", choices=tuple(TEAMS), required=True)
     parser.add_argument("--provider", choices=("anthropic", "transformers", "ollama", "llamacpp"), default="anthropic")
@@ -149,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None, *, policy=None) -> dict:
+    """Score one team once on the frozen test, unless that file is already measured."""
     args = build_parser().parse_args(argv)
     frozen = verify_frozen_test(args.root)
     tasks = read_jsonl(args.root / "eval" / "test.jsonl")

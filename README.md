@@ -1,44 +1,74 @@
 # Orbit
 
-A local planner, worker, and critic team that answers questions over a small bundled corpus with JSON-schema tool calls, and refuses any claim its tools do not support.
+A local language-agent team that calls tools under a schema and refuses any claim those tools cannot prove.
 
 [![check](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue)](https://www.python.org/)
+[![Live replay](https://img.shields.io/badge/replay-live-blue)](https://shmorsi.github.io/orbit/)
 
-**Fine-tuning taught the format, not the task.** QLoRA on Qwen2.5-1.5B raised the schema-valid rate from 0.6071428571428571 to 0.7797619047619048 (paired interval above zero), while task success went from 2 of 12 to 3 of 12 with an interval that includes zero. Frozen 12-task test, one score per model, harness v2.
+**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [Why this matters](#why-this-matters) · [Key results](#key-results) · [Six roles](#v2-six-roles) · [Quickstart](#quickstart) · [Integrity](#reproducibility-and-integrity)
 
-**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [v2: six roles](#v2-six-roles) · [Results](#results) · [Limits](#limits) · [Distill and score notebook](notebooks/run_distill_and_score.ipynb)
+```mermaid
+flowchart LR
+  task[Task] --> commander[Commander]
+  commander -->|assign| scout[Scout]
+  commander -->|assign| engineer[Engineer]
+  commander -->|assign| analyst[Analyst]
+  scout --> tools[Tools]
+  engineer --> tools
+  analyst --> tools
+  tools --> analyst
+  analyst -->|draft| critic[Critic]
+  critic -->|revise| analyst
+  critic -->|accept| auditor[Auditor]
+  auditor --> trace[JSONL trace]
+```
 
-## What it demonstrates
+Six seats share one gate. The commander assigns a step, specialists call tools, the critic can send a draft back, and the auditor refuses any claim the tool results do not support. The measured runs used the three-role team in [Architecture](#architecture). This six-role team has not been scored.
 
-- **Tool use under a schema.** Every planner, worker, and critic turn is one JSON object checked against its role schema. Six sandboxed tools; nothing in the tool path opens a socket.
-- **A grounding gate.** A claim survives only if the cited tool result contains it, a python call printed it, or it equals the count of matching lines in the cited text. Anything else is refused.
-- **A frozen, honest evaluation.** 12 test tasks (2 traps) hashed and tagged as `team-eval-v1`, a leakage check that keeps them out of training, one score per model, and paired bootstrap intervals. Negative results stay in.
-- **A fine-tuning study.** QLoRA on templated dialogs, plus a teacher-distillation path with hard request and cost caps.
+## Why this matters
 
-![Mission Control replaying a trace, with the frozen-test flight data underneath](docs/mission-board.png)
+Hiring teams want an agent that uses tools and stops when the evidence runs out. Orbit is a small, fully inspectable version of that problem. Every seat returns one JSON object. The tools are sandboxed and nothing in that path opens a socket. A critic can send a claim back. A gate keeps a claim only when the cited tool result contains it, a python call printed it, or it equals a count of matching lines in the cited text.
 
-<video src="docs/mission-control.mp4" controls muted playsinline></video>
+The frozen test is hashed, tagged, and kept out of training. Each model is scored once, with a paired bootstrap, and a negative result stays on the page. The measured 1.5B QLoRA run learned the answer format. On the frozen 12-task test it did not produce a task-success gain this sample can support. The paired interval for task success includes zero. That is the result.
+
+## Key results
+
+This block is written by `python -m orbit_agents.eval.readme` from the files in `results/`. API scores and team distill are pending. A pending run is a row that says not scored, with no number filled in.
+
+<!-- RESULTS_START -->
+Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, 307 train dialogues and 71 tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went from 1.152004337310791 at step 10 to 0.05106291174888611 at step 150. Task success did not clear zero.
+
+| Run | Successes | Task-success rate | Schema-valid rate | Trap refusals |
+| --- | --- | --- | --- | --- |
+| Single base | 2 of 12 | 0.16666666666666666 | 0.75 | 2 of 2 |
+| Team base | 2 of 12 | 0.16666666666666666 | 0.6071428571428571 | 2 of 2 |
+| Team plus adapter | 3 of 12 | 0.25 | 0.7797619047619048 | 1 of 2 |
+| Team distill | not scored | | | |
+
+The adapter's two answerable successes sit next to a missed trap: correct refusals went from 2 to 1. The paired bootstrap for task success, adapter minus team base, is -0.16666666666666666 to 0.3333333333333333 (point 0.08333333333333333). That interval includes zero, so the task-success gain is not statistically significant. The same pair's schema-valid interval is 0.0013888888888889117 to 0.33888888888888885 (point 0.17261904761904764). Schema-valid rate moved. Task success did not, on this 12-task set.
+
+The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were 2 of 12, 2 of 12, then 1 of 12, with schema-valid rates 0.0, 0.07083333333333335, and 0.6131944444444445. Logged loss went from 1.3191939353942872 to 0.20024461746215821. Its task-success interval also failed to clear zero. Fine-tuning taught the format.
+
+The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config. It has not been scored.
+
+The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
+<!-- RESULTS_END -->
+
+![Mission Control replaying a saved trace, with the frozen-test flight data underneath](docs/mission-board.png)
+
+![Flight-data board for the frozen 1.5B runs: task success, schema-valid rate, the paired bootstrap, training loss, and trap outcomes, with team distill empty](docs/mission-flight-data.png)
+
+<video src="docs/mission-control.mp4" controls muted playsinline aria-label="Mission Control replaying a saved trace, stepping through planner, worker, tool, and critic"></video>
 
 ![Mission Control replaying a saved engine trace](docs/mission-control.gif)
 
-## Quickstart
+![Mission Control at the moment the critic accepts a grounded claim about printer jobs](docs/mission-replay.png)
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-make setup && make doctor   # install, then time the scripted harness
-make test                   # the test suite
-make demo                   # Mission Control on localhost
-```
-
-Platform notes (M1, Linux, Windows) and what you should see are in [Run it locally](#run-it-locally).
-
-## How it works
+## Architecture
 
 Orbit runs over a fictional makerspace corpus. The worker calls tools. The critic sends a bad claim back. A gate keeps a claim when the cited tool result contains it, when a successful python call printed the count, or when the count equals the number of lines in the cited text that contain a token from the question. Otherwise the gate refuses the claim. Mission Control replays the JSONL trace, including a task you start on your own machine.
-
-The measured 1.5B QLoRA run learned the answer format. On the frozen 12-task test it did not produce a task-success gain this sample can support. The paired interval for task success includes zero. That is the result, and the page says so.
-
-### Architecture
 
 ```mermaid
 flowchart LR
@@ -133,26 +163,36 @@ Each target scores the frozen test once and writes `results/v3_api/<model>/team_
 
 If `ORBIT_ANTHROPIC_API_KEY` is unset, `make score-v1` and `make score-v2` exit before any request and name that variable. Nothing is read from a file. `make score-dry-run` does not read a key.
 
-## Results
+## Quickstart
 
-<!-- RESULTS_START -->
-Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, 307 train dialogues and 71 tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went from 1.152004337310791 at step 10 to 0.05106291174888611 at step 150. Task success did not clear zero.
+Three commands from a fresh clone. The first creates the environment and installs the package. The second runs the suite. The third opens Mission Control.
 
-| Run | Successes | Task-success rate | Schema-valid rate | Trap refusals |
-| --- | --- | --- | --- | --- |
-| Single base | 2 of 12 | 0.16666666666666666 | 0.75 | 2 of 2 |
-| Team base | 2 of 12 | 0.16666666666666666 | 0.6071428571428571 | 2 of 2 |
-| Team plus adapter | 3 of 12 | 0.25 | 0.7797619047619048 | 1 of 2 |
-| Team distill | not scored | | | |
+```bash
+python3 -m venv .venv && source .venv/bin/activate && make setup
+make test
+make demo
+```
 
-The adapter's two answerable successes sit next to a missed trap: correct refusals went from 2 to 1. The paired bootstrap for task success, adapter minus team base, is -0.16666666666666666 to 0.3333333333333333 (point 0.08333333333333333). That interval includes zero, so the task-success gain is not statistically significant. The same pair's schema-valid interval is 0.0013888888888889117 to 0.33888888888888885 (point 0.17261904761904764). Schema-valid rate moved. Task success did not, on this 12-task set.
+`make doctor` times the scripted harness on your machine. Platform notes are in [Run it locally](#run-it-locally). The development notes, including what not to edit, are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were 2 of 12, 2 of 12, then 1 of 12, with schema-valid rates 0.0, 0.07083333333333335, and 0.6131944444444445. Logged loss went from 1.3191939353942872 to 0.20024461746215821. Its task-success interval also failed to clear zero. Fine-tuning taught the format.
+## Reproducibility and integrity
 
-The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config. It has not been scored.
+- The frozen test is `eval/test.jsonl`, tagged `team-eval-v1`. Its digest is stored in `eval/manifest.json`. `make score-dry-run` checks the file and the tag, reads no API key, and writes nothing.
+- `python finetune/leakage.py` fails if a frozen task, a near-duplicate, or an oracle call appears in train or tune.
+- `python -m orbit_agents.eval.readme --check` fails if the Key results block disagrees with `results/`. The test suite runs that check.
+- A config is scored once. `eval.run` and `eval.compare` refuse archived files, harness checks, the pending placeholders, and a second score of a measured frozen-test file.
+- Files at the top of `results/` with status pending are not model scores. `results/harness_single.json` and `results/harness_team.json` replay the scripted harness. They are system checks.
+- The manifest also stores a prompt digest from the protocol freeze. Later harness work changed the role prompts. The scorer checks the frozen test and the tag. This page does not treat that prompt digest as a current hash of the prompts.
+- Cite the project with [CITATION.cff](CITATION.cff).
 
-The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
-<!-- RESULTS_END -->
+## What I'd do next
+
+Future work, not a claim about a result:
+
+- Score the three-role team and the six-role team once on the same API model, with `make score-v1` and `make score-v2`, and let the generator add the paired interval.
+- Run the distill notebook once on a Colab T4, score team distill under harness v3, and commit only `results/v3_qwen1.5b/*.json` and `README.md`.
+- Keep the archived v2 numbers in `results/v2_qwen1.5b/` and do not compare them with a v3 score.
+- Train more than one seed before talking about a distribution. This page has one training run per config.
 
 ## Limits
 
@@ -289,7 +329,3 @@ Do not score the frozen test in a loop. A new model gets one frozen score. Itera
 [`notebooks/run_distill_and_score.ipynb`](notebooks/run_distill_and_score.ipynb) runs the team-distill path end to end on a free T4: the Claude teacher (`claude-haiku-5-5` by default, `claude-sonnet-5-5` as an option) under the same request cap and cost stop, QLoRA with `finetune/configs/qlora_distill.json`, one frozen score into `results/v3_qwen1.5b/team_distill.json`, the v3 baselines it needs (each once, skipped if present), the paired comparison, and a regenerated README results block. Add the key as a Colab secret named `ORBIT_ANTHROPIC_API_KEY` before running. It is read from secrets or the environment and never printed. If the secret and the environment variable are both missing, the key cell exits and names `ORBIT_ANTHROPIC_API_KEY`. The download keeps `results/v3_qwen1.5b/*.json` and `README.md` at those paths. Commit only those files.
 
 The results block above is written by `python -m orbit_agents.eval.readme` from the files in `results/`. `--check` fails when the README and the files disagree, and the test suite runs that check.
-
-## What I built
-
-The team loop, the six tools, the frozen split, the leakage check, the optional LoRA trainer, the teacher distillation script, and Mission Control. The measured model scores are the 0.5B run and the 1.5B run above. Team distill is the next score, and it is not claimed here.

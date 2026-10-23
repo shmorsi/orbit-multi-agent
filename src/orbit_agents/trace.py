@@ -45,11 +45,13 @@ def mission_header(task: dict, result, *, harness: str | None = None, team: str 
 
 
 def dump_trace(task: dict, result, *, harness: str | None = None, team: str = "v1") -> str:
+    """Serialize one run as JSONL, header first."""
     rows = [mission_header(task, result, harness=harness, team=team), *result.events]
     return "".join(json.dumps(row, ensure_ascii=True) + "\n" for row in rows)
 
 
 def write_trace(path: Path, task: dict, backend, *, single: bool = False, harness: str | None = None) -> Path:
+    """Run the three-role team or the single model and write its JSONL."""
     path.parent.mkdir(parents=True, exist_ok=True)
     workspace = path.parent / ".runs" / path.stem
     runner = run_single if single else run_team
@@ -59,6 +61,7 @@ def write_trace(path: Path, task: dict, backend, *, single: bool = False, harnes
 
 
 def bundled_traces(directory: Path | None = None) -> list[Path]:
+    """Rewrite the committed v1 Mission Control traces from the engine."""
     directory = directory or TRACE_DIR
     directory.mkdir(parents=True, exist_ok=True)
     by_id = {task["id"]: task for task in all_tasks()}
@@ -94,6 +97,7 @@ AUDITOR_EXTRA_NUMBER = 40
 
 
 def write_trace_v2(path: Path, task: dict, policy, *, harness: str | None = None) -> Path:
+    """Run the six-role scripted policy and write its JSONL."""
     from orbit_agents.team_v2 import run_team_v2
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,6 +144,7 @@ def bundled_traces_v2(directory: Path | None = None) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Rewrite the bundled traces for v1 or v2."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Rewrite the bundled scripted-harness traces")

@@ -115,6 +115,7 @@ ROLE_SCHEMAS = {"planner": PLANNER_SCHEMA, "worker": WORKER_SCHEMA, "critic": CR
 
 
 def validate(schema: dict, payload: dict) -> None:
+    """Raise when the payload does not match the role schema."""
     jsonschema.validate(payload, schema)
 
 
@@ -122,7 +123,7 @@ def _known(payload: dict, allowed: set[str]) -> dict:
     return {key: value for key, value in payload.items() if key in allowed}
 
 
-def coerce_int(value):
+def coerce_int(value: object) -> object:
     """Whole numbers written as 5.0 or \"5\" are the integer 5. Booleans are not numbers."""
     if isinstance(value, bool) or isinstance(value, int):
         return value
@@ -133,7 +134,8 @@ def coerce_int(value):
     return value
 
 
-def normalize_citation(value):
+def normalize_citation(value: object) -> object:
+    """Rewrite spellings like 'call 1' to call_1. Other values pass through."""
     if not isinstance(value, str):
         return value
     match = re.fullmatch(r"(?i)call[\s_-]*([1-9]\d*)", value.strip())
@@ -191,6 +193,7 @@ def normalize_payload(role: str, payload: dict) -> dict:
 
 
 def check_worker(payload: dict) -> str | None:
+    """Return an error string when a worker payload breaks a role rule, else None."""
     try:
         validate(WORKER_SCHEMA, payload)
     except jsonschema.ValidationError as exc:
@@ -218,6 +221,7 @@ def check_worker(payload: dict) -> str | None:
 
 
 def check_role(role: str, payload: dict) -> str | None:
+    """Return an error string when the payload breaks that role's rules, else None."""
     if role == "worker":
         return check_worker(payload)
     try:
@@ -228,6 +232,7 @@ def check_role(role: str, payload: dict) -> str | None:
 
 
 def dumps(payload: dict) -> str:
+    """Serialize one payload the way the trace stores it."""
     return json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
 
 
@@ -291,6 +296,7 @@ def role_schema_v2(role: str, *, may_answer: bool = False) -> dict:
 
 
 def normalize_payload_v2(role: str, payload: dict) -> dict:
+    """Drop unknown keys and coerce claim spellings for a v2 role."""
     if not isinstance(payload, dict):
         return payload
     if role == "commander":

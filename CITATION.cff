@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: If you use Orbit, cite it as below.
+type: software
+title: Orbit
+abstract: >-
+  A local language-agent team that calls tools under a schema and refuses
+  any claim those tools cannot prove. The frozen evaluation and the measured
+  fine-tune are in the repository.
+authors:
+  - family-names: Morsi
+    given-names: Sherif
+    email: shmorsi@outlook.com
+repository-code: https://github.com/shmorsi/orbit-multi-agent
+url: https://shmorsi.github.io/orbit/
+license: MIT
+version: 0.1.0
+date-released: 2026-10-23

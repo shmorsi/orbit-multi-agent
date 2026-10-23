@@ -9,7 +9,7 @@ authors = [{ name = "Sherif Morsi", email = "shmorsi@outlook.com" }]
 dependencies = ["jsonschema>=4.21"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff==0.17.2"]
 infer = [
   "torch==2.11.0",
   "transformers==5.20.2",
@@ -43,3 +43,12 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["src", "finetune"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = ["F", "E", "I", "B", "UP"]
+ignore = ["E501"]

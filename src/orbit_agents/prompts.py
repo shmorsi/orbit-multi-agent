@@ -47,6 +47,7 @@ SINGLE_SYSTEM = (
 
 
 def prompt_blob() -> str:
+    """The v1 role prompts, joined, for the protocol digest."""
     return "\n".join([PLANNER_SYSTEM, WORKER_SYSTEM, CRITIC_SYSTEM, SINGLE_SYSTEM])
 
 
@@ -110,4 +111,5 @@ ROLE_PROMPTS_V2 = {
 
 
 def prompt_blob_v2() -> str:
+    """The v2 role prompts, joined."""
     return "\n".join(ROLE_PROMPTS_V2[role] for role in ("commander", "scout", "engineer", "analyst", "critic"))

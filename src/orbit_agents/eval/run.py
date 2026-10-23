@@ -6,10 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
+from orbit_agents.engine import run_single, run_team
 from orbit_agents.eval.metrics import summarize
 from orbit_agents.eval.score import score_task
 from orbit_agents.eval.score_team import verify_frozen_test
-from orbit_agents.engine import run_single, run_team
 from orbit_agents.paths import ROOT
 from orbit_agents.scripted import ScriptedBackend
 from orbit_agents.tasks import read_jsonl
@@ -32,6 +32,7 @@ HARNESS_NOTE = "A system_check replays the scripted harness. It is not a languag
 
 
 def result_relative(path: Path, root: Path = ROOT) -> str | None:
+    """Path relative to the repo, or None when it is outside the checkout."""
     candidate = path if path.is_absolute() else root / path
     try:
         return candidate.resolve().relative_to(root.resolve()).as_posix()
@@ -53,6 +54,7 @@ def locked_result_reason(path: Path, root: Path = ROOT) -> str | None:
 
 
 def measured_model_eval(path: Path, root: Path = ROOT) -> bool:
+    """True when the file exists and is a measured model eval."""
     candidate = path if path.is_absolute() else root / path
     if not candidate.is_file():
         return False
@@ -70,6 +72,7 @@ SPLITS = {
 
 
 def load_tasks(split: str) -> list[dict]:
+    """Load one split. The tune split keeps only rows marked tune."""
     rows = read_jsonl(SPLITS[split])
     if split == "tune":
         return [task for task in rows if task.get("subset") == "tune"]
@@ -77,6 +80,7 @@ def load_tasks(split: str) -> list[dict]:
 
 
 def load_backend(name: str, task: dict, model: str, adapter: str | None, max_new_tokens: int):
+    """Build the named backend. A scripted backend is tied to one task."""
     if name == "scripted":
         return ScriptedBackend(task)
     if name == "transformers":
@@ -94,7 +98,9 @@ def load_backend(name: str, task: dict, model: str, adapter: str | None, max_new
     raise SystemExit(f"unknown backend {name}")
 
 
-def execute_v2(tasks: list[dict], *, backend_name: str, model: str, adapter: str | None, max_new_tokens: int, workspace: Path):
+def execute_v2(
+    tasks: list[dict], *, backend_name: str, model: str, adapter: str | None, max_new_tokens: int, workspace: Path
+) -> list[dict]:
     """The six-role team. Same tools, gate, and scorer as v1."""
     from orbit_agents.policy import LegacyBackendPolicy
     from orbit_agents.scripted_v2 import ScriptedPolicyV2
@@ -112,7 +118,17 @@ def execute_v2(tasks: list[dict], *, backend_name: str, model: str, adapter: str
     return rows
 
 
-def execute(tasks: list[dict], *, mode: str, backend_name: str, model: str, adapter: str | None, max_new_tokens: int, workspace: Path):
+def execute(
+    tasks: list[dict],
+    *,
+    mode: str,
+    backend_name: str,
+    model: str,
+    adapter: str | None,
+    max_new_tokens: int,
+    workspace: Path,
+) -> list[dict]:
+    """Score every task with the three-role team or the single model."""
     shared = None
     if backend_name != "scripted":
         shared = load_backend(backend_name, tasks[0], model, adapter, max_new_tokens)
@@ -126,6 +142,7 @@ def execute(tasks: list[dict], *, mode: str, backend_name: str, model: str, adap
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Score a split and write one JSON file, unless the output path is locked."""
     parser = argparse.ArgumentParser(description="Score Orbit on a frozen split")
     parser.add_argument("--split", choices=("dev", "tune", "test"), default="test")
     parser.add_argument("--mode", choices=["team", "single"], default="team")

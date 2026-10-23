@@ -5,14 +5,13 @@ from __future__ import annotations
 import math
 import random
 
-
 # CPython 3.11 and 3.12 can sum the same schema-valid series to values a few
 # binary steps apart (about 1e-17 here). This bound stays far below one task
 # on the 12-task rates. It does not round a published figure.
 FLOAT_NOISE = 1e-12
 
 
-def measurements_match(left, right) -> bool:
+def measurements_match(left: object, right: object) -> bool:
     """True when two generated measurements are the same record.
 
     Floats may differ by floating-point noise between interpreters. Integers,
@@ -21,7 +20,9 @@ def measurements_match(left, right) -> bool:
     if isinstance(left, dict) and isinstance(right, dict):
         return left.keys() == right.keys() and all(measurements_match(left[key], right[key]) for key in left)
     if isinstance(left, list) and isinstance(right, list):
-        return len(left) == len(right) and all(measurements_match(a, b) for a, b in zip(left, right))
+        return len(left) == len(right) and all(
+            measurements_match(a, b) for a, b in zip(left, right, strict=True)
+        )
     if isinstance(left, bool) or isinstance(right, bool):
         return isinstance(left, bool) and isinstance(right, bool) and left is right
     if isinstance(left, (int, float)) and isinstance(right, (int, float)):
@@ -36,6 +37,7 @@ def measurements_match(left, right) -> bool:
 
 
 def mean(values: list[float]) -> float | None:
+    """Arithmetic mean, or None when the series is empty."""
     if not values:
         return None
     return sum(values) / len(values)
@@ -49,6 +51,7 @@ def bootstrap_mean_difference(
     seed: int = 0,
     alpha: float = 0.05,
 ) -> dict:
+    """Paired percentile bootstrap of the mean of treatment minus control."""
     if len(treatment) != len(control) or not treatment:
         raise ValueError("bootstrap needs two equal non-empty series")
     point = sum(a - b for a, b in zip(treatment, control, strict=True)) / len(treatment)
@@ -77,6 +80,7 @@ def bootstrap_mean_difference(
 
 
 def summarize(rows: list[dict]) -> dict:
+    """Task success, schema-valid rate, and trap refusals for one measured run."""
     successes = [1.0 if row["success"] else 0.0 for row in rows]
     steps = [float(row["n_steps"]) for row in rows]
     schema = [row["schema_valid_rate"] for row in rows if row["schema_valid_rate"] is not None]
