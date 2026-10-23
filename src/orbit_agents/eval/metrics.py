@@ -2,7 +2,37 @@
 
 from __future__ import annotations
 
+import math
 import random
+
+
+# CPython 3.11 and 3.12 can sum the same schema-valid series to values a few
+# binary steps apart (about 1e-17 here). This bound stays far below one task
+# on the 12-task rates. It does not round a published figure.
+FLOAT_NOISE = 1e-12
+
+
+def measurements_match(left, right) -> bool:
+    """True when two generated measurements are the same record.
+
+    Floats may differ by floating-point noise between interpreters. Integers,
+    strings, and structure still have to match.
+    """
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(measurements_match(left[key], right[key]) for key in left)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(measurements_match(a, b) for a, b in zip(left, right))
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left is right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        if left == right:
+            return True
+        if isinstance(left, int) or isinstance(right, int):
+            return False
+        if math.isnan(left) or math.isnan(right):
+            return False
+        return abs(left - right) <= FLOAT_NOISE
+    return left == right
 
 
 def mean(values: list[float]) -> float | None:

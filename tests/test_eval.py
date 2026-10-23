@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from orbit_agents.eval.compare import compare
+from orbit_agents.eval.metrics import measurements_match
 from orbit_agents.tasks import task_by_id
 
 
@@ -97,7 +98,19 @@ def test_three_way_comparison_matches_the_measured_v2_file():
         }
     )
     committed = json.loads(Path("results/v2_qwen1.5b/comparison.json").read_text(encoding="utf-8"))
-    assert report == committed
+    assert measurements_match(report, committed)
+
+
+def test_measurement_match_allows_float_noise_and_rejects_a_real_change():
+    point = 0.029761904761904795
+    assert measurements_match(point, 0.029761904761904812)
+    assert not measurements_match(point, point + 1e-6)
+    assert not measurements_match(
+        {"n": 12, "method": "paired_percentile_bootstrap"},
+        {"n": 11, "method": "paired_percentile_bootstrap"},
+    )
+    assert not measurements_match({"method": "paired_percentile_bootstrap"}, {"method": "other"})
+    assert not measurements_match(True, 1)
 
 
 def test_team_distill_pairs_extend_the_original_comparison(tmp_path):
