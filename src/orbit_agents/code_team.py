@@ -9,7 +9,6 @@ not support.
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from pathlib import Path
 
@@ -192,15 +191,17 @@ class CodeRun:
         assert self.workspace is not None
         return run_pytest(self.workspace)
 
-    def _stable(self, text: str) -> str:
-        """Drop absolute paths and pytest timings so a scripted trace is byte-stable."""
-        assert self.workspace is not None
-        cleaned = text or ""
-        for path in (str(self.workspace), str(self.workspace.resolve())):
-            cleaned = cleaned.replace(path + "/", "")
-            cleaned = cleaned.replace(path, "")
-        cleaned = re.sub(r" in \d+\.\d+s", "", cleaned)
-        return cleaned[-500:]
+    def _summary(self, result: dict) -> str:
+        """A count line. Pytest's traceback text changes across versions, so the trace does not store it."""
+        if result.get("timed_out"):
+            return "timed out"
+        if result.get("ok"):
+            return f"{result.get('n_passed', 0)} passed"
+        if result.get("n_failed"):
+            return f"{result['n_failed']} failed"
+        if result.get("n_errors"):
+            return f"{result['n_errors']} error"
+        return "no tests passed"
 
     def _critic_note(self, result: dict) -> str:
         state = "Tests passed." if result.get("ok") else "Tests failed."
@@ -240,8 +241,8 @@ class CodeRun:
                 "test",
                 step=self.n_steps,
                 ok=bool(pytest_result["ok"]),
-                summary=self._stable(pytest_result["summary"]),
-                stdout=self._stable(pytest_result["stdout"]),
+                summary=self._summary(pytest_result),
+                stdout=self._summary(pytest_result),
             )
             review = review_patch(diff=diff, pytest_result=pytest_result)
             self._event("reviewer", "review", step=self.n_steps, verdict=review["verdict"], reason=review["reason"])
