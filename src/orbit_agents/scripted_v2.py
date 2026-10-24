@@ -17,6 +17,7 @@ TOOL_ROLE = {tool: role for role, tools in ROLE_TOOLS.items() for tool in tools}
 
 
 def commander_steps(task: dict) -> list[dict]:
+    """Assign each oracle call to the specialist whose tool list contains it."""
     steps = []
     for plan_step, call in zip(task["plan"], task["oracle_calls"], strict=True):
         steps.append({"goal": plan_step["goal"], "role": TOOL_ROLE[call["tool"]], "tool": call["tool"]})

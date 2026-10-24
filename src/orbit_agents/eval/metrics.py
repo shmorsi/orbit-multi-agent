@@ -6,6 +6,7 @@ import random
 
 
 def mean(values: list[float]) -> float | None:
+    """Arithmetic mean, or None for an empty series."""
     if not values:
         return None
     return sum(values) / len(values)
@@ -19,6 +20,7 @@ def bootstrap_mean_difference(
     seed: int = 0,
     alpha: float = 0.05,
 ) -> dict:
+    """Paired percentile interval for the mean of treatment minus control. Seed is fixed."""
     if len(treatment) != len(control) or not treatment:
         raise ValueError("bootstrap needs two equal non-empty series")
     point = sum(a - b for a, b in zip(treatment, control, strict=True)) / len(treatment)
@@ -47,6 +49,7 @@ def bootstrap_mean_difference(
 
 
 def summarize(rows: list[dict]) -> dict:
+    """Task success, schema-valid rate, and trap refusals for one scored split."""
     successes = [1.0 if row["success"] else 0.0 for row in rows]
     steps = [float(row["n_steps"]) for row in rows]
     schema = [row["schema_valid_rate"] for row in rows if row["schema_valid_rate"] is not None]

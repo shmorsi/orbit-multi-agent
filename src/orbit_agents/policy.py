@@ -138,9 +138,7 @@ class AnthropicPolicy(LLMClient):
     def complete_text(self, messages: list[dict], schema: dict, *, role: str) -> str:
         del schema, role
         # The Messages API rejects an empty text turn, which a repair retry can carry.
-        sent = [
-            {**message, "content": message.get("content") or "(empty reply)"} for message in messages
-        ]
+        sent = [{**message, "content": message.get("content") or "(empty reply)"} for message in messages]
         return self.client.generate(sent)
 
     def usage(self) -> dict:
@@ -238,7 +236,8 @@ PROVIDERS = {
 PER_TASK_PROVIDERS = {"scripted"}
 
 
-def make_policy(provider: str, model: str | None = None, **kwargs) -> LLMClient:
+def make_policy(provider: str, model: str | None = None, **kwargs: object) -> LLMClient:
+    """Build the policy for one provider. Unknown names are refused."""
     if provider not in PROVIDERS:
         raise SystemExit(f"unknown provider {provider}; choose one of {', '.join(PROVIDERS)}")
     return PROVIDERS[provider](model, **kwargs)

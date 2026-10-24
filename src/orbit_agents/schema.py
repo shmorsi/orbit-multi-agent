@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 import jsonschema
 
@@ -115,6 +116,7 @@ ROLE_SCHEMAS = {"planner": PLANNER_SCHEMA, "worker": WORKER_SCHEMA, "critic": CR
 
 
 def validate(schema: dict, payload: dict) -> None:
+    """Raise jsonschema.ValidationError when payload does not match schema."""
     jsonschema.validate(payload, schema)
 
 
@@ -122,7 +124,7 @@ def _known(payload: dict, allowed: set[str]) -> dict:
     return {key: value for key, value in payload.items() if key in allowed}
 
 
-def coerce_int(value):
+def coerce_int(value: Any) -> Any:
     """Whole numbers written as 5.0 or \"5\" are the integer 5. Booleans are not numbers."""
     if isinstance(value, bool) or isinstance(value, int):
         return value
@@ -133,7 +135,8 @@ def coerce_int(value):
     return value
 
 
-def normalize_citation(value):
+def normalize_citation(value: Any) -> Any:
+    """Turn spellings like 'call 1' into call_1. Anything else passes through."""
     if not isinstance(value, str):
         return value
     match = re.fullmatch(r"(?i)call[\s_-]*([1-9]\d*)", value.strip())
@@ -191,6 +194,7 @@ def normalize_payload(role: str, payload: dict) -> dict:
 
 
 def check_worker(payload: dict) -> str | None:
+    """Return an error string when a worker turn is not one valid tool call or final."""
     try:
         validate(WORKER_SCHEMA, payload)
     except jsonschema.ValidationError as exc:
@@ -218,6 +222,7 @@ def check_worker(payload: dict) -> str | None:
 
 
 def check_role(role: str, payload: dict) -> str | None:
+    """Return an error string when a v1 role turn does not match its schema."""
     if role == "worker":
         return check_worker(payload)
     try:
@@ -228,6 +233,7 @@ def check_role(role: str, payload: dict) -> str | None:
 
 
 def dumps(payload: dict) -> str:
+    """Compact JSON for one turn. The trace and the repair loop store this string."""
     return json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
 
 
@@ -291,6 +297,7 @@ def role_schema_v2(role: str, *, may_answer: bool = False) -> dict:
 
 
 def normalize_payload_v2(role: str, payload: dict) -> dict:
+    """Drop unknown keys on a v2 turn. Required fields are still validated later."""
     if not isinstance(payload, dict):
         return payload
     if role == "commander":

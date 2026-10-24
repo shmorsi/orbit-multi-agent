@@ -3,7 +3,7 @@ PROVIDER ?= anthropic
 MODEL ?= claude-haiku-5-5
 MAX_COST_USD ?= 5
 
-.PHONY: setup demo doctor doctor-live traces traces-v2 test check readme score-v1 score-v2 score-dry-run finetune-data finetune-dry-run distill-dry-run
+.PHONY: setup demo doctor doctor-live traces traces-v2 test check readme figures score-v1 score-v2 score-dry-run finetune-data finetune-dry-run distill-dry-run
 
 setup:
 	$(PYTHON) -m pip install -e ".[dev]" -r requirements-infer.txt
@@ -43,6 +43,9 @@ check: test
 
 readme:
 	$(PYTHON) -m orbit_agents.eval.readme
+
+figures:
+	$(PYTHON) docs/build_figures.py
 
 finetune-data:
 	$(PYTHON) finetune/generate_data.py

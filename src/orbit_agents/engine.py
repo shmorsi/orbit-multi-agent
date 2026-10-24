@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Callable
 
 from orbit_agents.corpus import corpus_guide
 from orbit_agents.prompts import CRITIC_SYSTEM, PLANNER_SYSTEM, SINGLE_SYSTEM, WORKER_SYSTEM
@@ -14,7 +15,6 @@ from orbit_agents.tools import call_tool
 
 NUMBER_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d.])")
 ANSWER_NUMBER_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d])")
-REPAIR = "The previous reply was not valid for this role. Reply with one JSON object and nothing else."
 
 
 def repair_message(error: str) -> str:
@@ -27,6 +27,8 @@ def repair_message(error: str) -> str:
         f"Validator says: {detail} "
         "Reply with one JSON object and nothing else."
     )
+
+
 UNGROUNDED = "The claims were not in the cited tool results."
 STOPPED = "Stopped at the step limit before a grounded answer."
 MAX_TURNS = 8
@@ -75,6 +77,7 @@ def extract_json(raw: str) -> dict:
 
 
 def contains_number(text: str, value: int) -> bool:
+    """True when value appears as its own token, including a trailing .0."""
     number = int(value)
     if re.search(rf"(?<![\d.]){number}(?![\d.])", text):
         return True
@@ -88,6 +91,7 @@ def _number_token(token: str) -> str:
 
 
 def result_text(result: dict) -> str:
+    """Serialize a tool result the way the gate compares it."""
     return json.dumps(result, ensure_ascii=True)
 
 
@@ -291,7 +295,8 @@ def _value_supported(question: str, value: int, result: dict, blob: str) -> bool
     return value > 0 and value in _line_counts(question, result)
 
 
-def claims_are_grounded(question: str, claims: list, results: list, answer: str) -> bool:
+def claims_are_grounded(question: str, claims: list[dict], results: list[dict], answer: str) -> bool:
+    """True when every claim is supported by the tool result it cites."""
     supported: set[str] = set()
     for claim in claims:
         result = _cited_result(claim, results)
@@ -325,7 +330,9 @@ def _history(plan: dict | None, results: list, feedback: str) -> str:
     if results:
         lines.append("Tool results:")
         for index, item in enumerate(results, start=1):
-            lines.append(f"call_{index} {item['tool']} {dumps(item['arguments'])} -> {_clip(result_text(item['result']))}")
+            lines.append(
+                f"call_{index} {item['tool']} {dumps(item['arguments'])} -> {_clip(result_text(item['result']))}"
+            )
     else:
         lines.append("Tool results: none yet.")
     if feedback:
@@ -385,7 +392,9 @@ class TeamRun:
                 self.schema_valid += 1
                 canonical = dumps(payload)
                 if role in {"planner", "worker", "critic"}:
-                    self.examples.append({"role": role, "messages": prompt + [{"role": "assistant", "content": canonical}]})
+                    self.examples.append(
+                        {"role": role, "messages": prompt + [{"role": "assistant", "content": canonical}]}
+                    )
                 self._event(role, "parsed", payload=payload)
                 return payload
             self.schema_invalid += 1
@@ -491,9 +500,21 @@ class TeamRun:
         )
 
 
-def run_team(task: dict, backend, workspace: Path, on_event=None) -> RunResult:
+def run_team(
+    task: dict,
+    backend: Any,
+    workspace: Path,
+    on_event: Callable[[dict], None] | None = None,
+) -> RunResult:
+    """Run the planner, worker, and critic until the gate accepts or the turn limit hits."""
     return TeamRun(task, backend, workspace, single=False, on_event=on_event).execute()
 
 
-def run_single(task: dict, backend, workspace: Path, on_event=None) -> RunResult:
+def run_single(
+    task: dict,
+    backend: Any,
+    workspace: Path,
+    on_event: Callable[[dict], None] | None = None,
+) -> RunResult:
+    """Run the same loop with one model playing every role."""
     return TeamRun(task, backend, workspace, single=True, on_event=on_event).execute()

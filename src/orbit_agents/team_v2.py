@@ -19,6 +19,7 @@ import copy
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any, Callable
 
 from orbit_agents.corpus import corpus_guide
 from orbit_agents.engine import (
@@ -99,7 +100,9 @@ def audit(view: TraceView, status: str, answer: str, claims: list) -> dict:
         name = claim.get("name", "")
         result = _cited_result(claim, results)
         if result is None:
-            findings.append({"claim": name, "ok": False, "reason": f"citation {claim.get('citation')} is not a tool result"})
+            findings.append(
+                {"claim": name, "ok": False, "reason": f"citation {claim.get('citation')} is not a tool result"}
+            )
             continue
         blob = result_text(result)
         if "value" in claim:
@@ -111,7 +114,9 @@ def audit(view: TraceView, status: str, answer: str, claims: list) -> dict:
                     "value": value,
                     "citation": claim["citation"],
                     "ok": ok,
-                    "reason": "the cited result supports the value" if ok else "the cited result does not contain or print this value",
+                    "reason": "the cited result supports the value"
+                    if ok
+                    else "the cited result does not contain or print this value",
                 }
             )
             if ok:
@@ -124,7 +129,9 @@ def audit(view: TraceView, status: str, answer: str, claims: list) -> dict:
                     "text": claim["text"],
                     "citation": claim["citation"],
                     "ok": ok,
-                    "reason": "the cited result contains the text" if ok else "the cited result does not contain this text",
+                    "reason": "the cited result contains the text"
+                    if ok
+                    else "the cited result does not contain this text",
                 }
             )
     allowed = {_number_token(token) for token in NUMBER_RE.findall(view.question)} | supported_numbers
@@ -137,7 +144,9 @@ def audit(view: TraceView, status: str, answer: str, claims: list) -> dict:
             {
                 "number": number,
                 "ok": ok,
-                "reason": "appears in the question or a tool result" if ok else "appears in no tool result and not in the question",
+                "reason": "appears in the question or a tool result"
+                if ok
+                else "appears in no tool result and not in the question",
             }
         )
     # The verdict is the v1 gate itself, so v1 and v2 refuse exactly the same claims.
@@ -202,7 +211,9 @@ class TeamV2Run:
                 error = str(exc)
             if error is None and payload is not None:
                 self.schema_valid += 1
-                self.examples.append({"role": role, "messages": prompt + [{"role": "assistant", "content": dumps(payload)}]})
+                self.examples.append(
+                    {"role": role, "messages": prompt + [{"role": "assistant", "content": dumps(payload)}]}
+                )
                 self._event(role, "parsed", payload=payload)
                 return payload
             self.schema_invalid += 1
@@ -253,7 +264,9 @@ class TeamV2Run:
             if parsed is None:
                 return None
             if parsed["action"] == "final":
-                self._event("analyst", "draft", status=parsed["status"], answer=parsed["answer"], claims=parsed["claims"])
+                self._event(
+                    "analyst", "draft", status=parsed["status"], answer=parsed["answer"], claims=parsed["claims"]
+                )
                 return parsed
             self._run_tool("analyst", parsed)
         return None
@@ -301,12 +314,19 @@ class TeamV2Run:
             n_steps=self.n_steps,
             schema_valid=self.schema_valid,
             schema_invalid=self.schema_invalid,
-            tool_calls=[{"tool": item["tool"], "arguments": item["arguments"], "by": item["by"]} for item in self.results],
+            tool_calls=[
+                {"tool": item["tool"], "arguments": item["arguments"], "by": item["by"]} for item in self.results
+            ],
             gate_overrode=gate,
             messages=self.examples[0]["messages"] if self.examples else [],
         )
 
 
-def run_team_v2(task: dict, policy, workspace: Path, on_event=None) -> RunResult:
+def run_team_v2(
+    task: dict,
+    policy: Any,
+    workspace: Path,
+    on_event: Callable[[dict], None] | None = None,
+) -> RunResult:
+    """Run the six-role team until the auditor accepts or the turn limit hits."""
     return TeamV2Run(task, policy, workspace, on_event=on_event).execute()
-

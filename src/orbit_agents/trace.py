@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-from orbit_agents.engine import FLIGHT_RULES, run_single, run_team
+from orbit_agents.engine import FLIGHT_RULES, RunResult, run_single, run_team
 from orbit_agents.paths import ROOT
 from orbit_agents.scripted import ReviseOnce, ScriptedBackend
 from orbit_agents.tasks import all_tasks
@@ -13,7 +14,7 @@ from orbit_agents.tasks import all_tasks
 TRACE_DIR = ROOT / "mission" / "traces"
 
 
-def mission_header(task: dict, result, *, harness: str | None = None, team: str = "v1") -> dict:
+def mission_header(task: dict, result: RunResult, *, harness: str | None = None, team: str = "v1") -> dict:
     """The first trace row. A v1 header is byte-for-byte what it was before team v2 existed."""
     header = {
         "kind": "mission",
@@ -44,12 +45,14 @@ def mission_header(task: dict, result, *, harness: str | None = None, team: str 
     return header
 
 
-def dump_trace(task: dict, result, *, harness: str | None = None, team: str = "v1") -> str:
+def dump_trace(task: dict, result: RunResult, *, harness: str | None = None, team: str = "v1") -> str:
+    """JSONL text for one real run. The first row is the mission header."""
     rows = [mission_header(task, result, harness=harness, team=team), *result.events]
     return "".join(json.dumps(row, ensure_ascii=True) + "\n" for row in rows)
 
 
-def write_trace(path: Path, task: dict, backend, *, single: bool = False, harness: str | None = None) -> Path:
+def write_trace(path: Path, task: dict, backend: Any, *, single: bool = False, harness: str | None = None) -> Path:
+    """Run the v1 engine and write its trace. The file is whatever the engine emitted."""
     path.parent.mkdir(parents=True, exist_ok=True)
     workspace = path.parent / ".runs" / path.stem
     runner = run_single if single else run_team
@@ -59,13 +62,23 @@ def write_trace(path: Path, task: dict, backend, *, single: bool = False, harnes
 
 
 def bundled_traces(directory: Path | None = None) -> list[Path]:
+    """Rewrite the three v1 traces Mission Control ships with."""
     directory = directory or TRACE_DIR
     directory.mkdir(parents=True, exist_ok=True)
     by_id = {task["id"]: task for task in all_tasks()}
     written = [
-        write_trace(directory / "quotient.jsonl", by_id["dev-012"], ScriptedBackend(by_id["dev-012"]), harness="scripted_harness"),
-        write_trace(directory / "abort.jsonl", by_id["dev-015"], ScriptedBackend(by_id["dev-015"]), harness="scripted_harness"),
-        write_trace(directory / "revise.jsonl", by_id["dev-001"], ReviseOnce(by_id["dev-001"]), harness="scripted_harness"),
+        write_trace(
+            directory / "quotient.jsonl",
+            by_id["dev-012"],
+            ScriptedBackend(by_id["dev-012"]),
+            harness="scripted_harness",
+        ),
+        write_trace(
+            directory / "abort.jsonl", by_id["dev-015"], ScriptedBackend(by_id["dev-015"]), harness="scripted_harness"
+        ),
+        write_trace(
+            directory / "revise.jsonl", by_id["dev-001"], ReviseOnce(by_id["dev-001"]), harness="scripted_harness"
+        ),
     ]
     index = []
     for path in written:
@@ -93,7 +106,8 @@ V2_EXAMPLES = (
 AUDITOR_EXTRA_NUMBER = 40
 
 
-def write_trace_v2(path: Path, task: dict, policy, *, harness: str | None = None) -> Path:
+def write_trace_v2(path: Path, task: dict, policy: Any, *, harness: str | None = None) -> Path:
+    """Run the six-role team and write its trace."""
     from orbit_agents.team_v2 import run_team_v2
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,6 +154,7 @@ def bundled_traces_v2(directory: Path | None = None) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Rewrite the bundled scripted traces for v1 or v2."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Rewrite the bundled scripted-harness traces")

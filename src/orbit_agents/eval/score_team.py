@@ -22,6 +22,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from orbit_agents.engine import MAX_TURNS, run_team
 from orbit_agents.eval.metrics import bootstrap_mean_difference, summarize
@@ -51,6 +52,7 @@ def request_bound(n_tasks: int) -> dict:
 
 
 def verify_frozen_test(root: Path = ROOT) -> dict:
+    """Refuse to score when eval/test.jsonl does not match the manifest or the tag."""
     manifest = json.loads((root / "eval" / "manifest.json").read_text(encoding="utf-8"))
     body = (root / "eval" / "test.jsonl").read_bytes()
     digest = hashlib.sha256(body).hexdigest()
@@ -70,12 +72,14 @@ def verify_frozen_test(root: Path = ROOT) -> dict:
 
 
 def output_path(root: Path, team: str, model: str) -> Path:
+    """results/v3_api/<model>/team_v1.json or team_v2.json. Odd model names are refused."""
     if not model or not all(char.isalnum() or char in "._-" for char in model):
         raise SystemExit(f"refusing model name {model!r}")
     return root / API_RESULTS / model / f"team_{team}.json"
 
 
 def is_measured(path: Path) -> bool:
+    """True when the file is a measured model eval. Missing and pending are false."""
     if not path.is_file():
         return False
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -90,7 +94,16 @@ def _runner(team: str):
     return lambda task, policy, workspace: run_team(task, PolicyBackend(policy), workspace)
 
 
-def score_tasks(tasks: list[dict], *, team: str, provider: str, model: str | None, workspace: Path, policy_kwargs: dict, policy=None):
+def score_tasks(
+    tasks: list[dict],
+    *,
+    team: str,
+    provider: str,
+    model: str | None,
+    workspace: Path,
+    policy_kwargs: dict,
+    policy: Any = None,
+) -> tuple[list[dict], Any, dict | None]:
     """Run every task once. Returns (rows, policy, stop) where stop is None or {reason, detail}."""
     runner = _runner(team)
     shared = policy
@@ -108,7 +121,11 @@ def score_tasks(tasks: list[dict], *, team: str, provider: str, model: str | Non
         try:
             result = runner(task, current, workspace / task["id"])
         except stops as exc:
-            return rows, shared, {"reason": exc.reason, "detail": exc.detail, "after_task": rows[-1]["id"] if rows else None}
+            return (
+                rows,
+                shared,
+                {"reason": exc.reason, "detail": exc.detail, "after_task": rows[-1]["id"] if rows else None},
+            )
         rows.append(score_task(task, result))
     return rows, shared, None
 
@@ -123,32 +140,48 @@ def write_comparison(folder: Path) -> Path | None:
     if [row["id"] for row in v2] != [row["id"] for row in v1]:
         raise SystemExit("team_v1 and team_v2 task order differ")
     block = {}
-    for label, field in (("task_success_rate", "success"), ("mean_steps", "n_steps"), ("schema_valid_rate", "schema_valid_rate")):
+    for label, field in (
+        ("task_success_rate", "success"),
+        ("mean_steps", "n_steps"),
+        ("schema_valid_rate", "schema_valid_rate"),
+    ):
         treatment = [float(row[field]) for row in v2]
         control = [float(row[field]) for row in v1]
         block[label] = bootstrap_mean_difference(treatment, control)
-    report = {"status": "measured", "kind": "comparison", "n_resamples": 10000, "seed": 0, "pairs": {"team_v2_minus_team_v1": block}}
+    report = {
+        "status": "measured",
+        "kind": "comparison",
+        "n_resamples": 10000,
+        "seed": 0,
+        "pairs": {"team_v2_minus_team_v1": block},
+    }
     path = folder / "comparison.json"
     path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return path
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Arguments for one frozen score. --dry-run checks the protocol and does not call a model."""
     parser = argparse.ArgumentParser(description="Score one team once on the frozen test")
     parser.add_argument("--team", choices=tuple(TEAMS), required=True)
     parser.add_argument("--provider", choices=("anthropic", "transformers", "ollama", "llamacpp"), default="anthropic")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-requests", type=int, default=None, help="Hard request cap; defaults to the computed bound")
+    parser.add_argument(
+        "--max-requests", type=int, default=None, help="Hard request cap; defaults to the computed bound"
+    )
     parser.add_argument("--max-cost-usd", type=float, default=DEFAULT_MAX_COST_USD)
     parser.add_argument("--requests-per-minute", type=float, default=None)
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--dry-run", action="store_true", help="Check the protocol and print the request bound; no key, no request")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Check the protocol and print the request bound; no key, no request"
+    )
     return parser
 
 
-def main(argv: list[str] | None = None, *, policy=None) -> dict:
+def main(argv: list[str] | None = None, *, policy: Any = None) -> dict:
+    """Score one team once. An already measured file is refused."""
     args = build_parser().parse_args(argv)
     frozen = verify_frozen_test(args.root)
     tasks = read_jsonl(args.root / "eval" / "test.jsonl")
@@ -179,12 +212,22 @@ def main(argv: list[str] | None = None, *, policy=None) -> dict:
     previous = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else {}
     kwargs: dict = {}
     if args.provider == "anthropic":
-        kwargs = {"max_requests": max_requests, "max_cost_usd": args.max_cost_usd, "requests_per_minute": args.requests_per_minute}
+        kwargs = {
+            "max_requests": max_requests,
+            "max_cost_usd": args.max_cost_usd,
+            "requests_per_minute": args.requests_per_minute,
+        }
     elif args.provider == "transformers":
         kwargs = {"adapter": args.adapter, "max_new_tokens": args.max_new_tokens}
     workspace = args.root / "traces" / "eval" / f"team_{args.team}" / args.provider
     rows, used, stop = score_tasks(
-        tasks, team=args.team, provider=args.provider, model=args.model, workspace=workspace, policy_kwargs=kwargs, policy=policy
+        tasks,
+        team=args.team,
+        provider=args.provider,
+        model=args.model,
+        workspace=workspace,
+        policy_kwargs=kwargs,
+        policy=policy,
     )
     report = {
         "kind": "model_eval",

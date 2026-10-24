@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from typing import Any
 
 
-def pick_device(torch_module=None) -> str:
+def pick_device(torch_module: Any = None) -> str:
     """cuda, then Apple MPS, then CPU. A missing torch module means CPU."""
     if torch_module is None:
         return "cpu"
@@ -21,7 +22,8 @@ def pick_device(torch_module=None) -> str:
     return "cpu"
 
 
-def inference_dtype(device: str, torch_module):
+def inference_dtype(device: str, torch_module: Any) -> Any:
+    """float32 on CPU, bfloat16 on CUDA when the GPU supports it, otherwise float16."""
     if device == "cpu":
         return torch_module.float32
     if device == "cuda" and torch_module.cuda.is_bf16_supported():
@@ -55,6 +57,7 @@ def torchao_is_compatible(version: str | None) -> bool:
 
 
 def assert_torchao_allows_peft() -> None:
+    """Raise when the installed torchao is too old for the pinned peft."""
     try:
         import torchao
     except ImportError as exc:
@@ -173,9 +176,9 @@ class LlamaCppBackend:
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
         del role
-        body = json.dumps(
-            {"model": self.model, "messages": messages, "temperature": 0, "max_tokens": 256}
-        ).encode("utf-8")
+        body = json.dumps({"model": self.model, "messages": messages, "temperature": 0, "max_tokens": 256}).encode(
+            "utf-8"
+        )
         request = urllib.request.Request(
             self.base_url + "/chat/completions",
             data=body,

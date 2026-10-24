@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from orbit_agents.eval.metrics import summarize
 from orbit_agents.eval.score import score_task
@@ -21,13 +22,15 @@ SPLITS = {
 
 
 def load_tasks(split: str) -> list[dict]:
+    """Load one frozen split. tune is the tune subset of the dev file."""
     rows = read_jsonl(SPLITS[split])
     if split == "tune":
         return [task for task in rows if task.get("subset") == "tune"]
     return rows
 
 
-def load_backend(name: str, task: dict, model: str, adapter: str | None, max_new_tokens: int):
+def load_backend(name: str, task: dict, model: str, adapter: str | None, max_new_tokens: int) -> Any:
+    """Build one backend. scripted follows the task oracle and is not a model score."""
     if name == "scripted":
         return ScriptedBackend(task)
     if name == "transformers":
@@ -45,7 +48,9 @@ def load_backend(name: str, task: dict, model: str, adapter: str | None, max_new
     raise SystemExit(f"unknown backend {name}")
 
 
-def execute_v2(tasks: list[dict], *, backend_name: str, model: str, adapter: str | None, max_new_tokens: int, workspace: Path):
+def execute_v2(
+    tasks: list[dict], *, backend_name: str, model: str, adapter: str | None, max_new_tokens: int, workspace: Path
+) -> list[dict]:
     """The six-role team. Same tools, gate, and scorer as v1."""
     from orbit_agents.policy import LegacyBackendPolicy
     from orbit_agents.scripted_v2 import ScriptedPolicyV2
@@ -63,7 +68,17 @@ def execute_v2(tasks: list[dict], *, backend_name: str, model: str, adapter: str
     return rows
 
 
-def execute(tasks: list[dict], *, mode: str, backend_name: str, model: str, adapter: str | None, max_new_tokens: int, workspace: Path):
+def execute(
+    tasks: list[dict],
+    *,
+    mode: str,
+    backend_name: str,
+    model: str,
+    adapter: str | None,
+    max_new_tokens: int,
+    workspace: Path,
+) -> list[dict]:
+    """Score every task once with the v1 team or the single-model baseline."""
     shared = None
     if backend_name != "scripted":
         shared = load_backend(backend_name, tasks[0], model, adapter, max_new_tokens)
@@ -77,6 +92,7 @@ def execute(tasks: list[dict], *, mode: str, backend_name: str, model: str, adap
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Score one split once and write the JSON report to --out."""
     parser = argparse.ArgumentParser(description="Score Orbit on a frozen split")
     parser.add_argument("--split", choices=("dev", "tune", "test"), default="test")
     parser.add_argument("--mode", choices=["team", "single"], default="team")
@@ -127,7 +143,11 @@ def main(argv: list[str] | None = None) -> None:
         report["team"] = "v2"
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"out": str(args.out), "kind": kind, "n_success": summary["n_success"], "n_tasks": summary["n_tasks"]}))
+    print(
+        json.dumps(
+            {"out": str(args.out), "kind": kind, "n_success": summary["n_success"], "n_tasks": summary["n_tasks"]}
+        )
+    )
 
 
 if __name__ == "__main__":

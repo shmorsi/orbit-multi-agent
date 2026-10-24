@@ -35,6 +35,7 @@ DISTILL_PAIRS = (
 
 
 def compare(paths: dict[str, Path], *, n_resamples: int = 10000, seed: int = 0) -> dict:
+    """Paired bootstrap for measured model files. A pending file is refused."""
     for name in ("single_base", "team_base", "team_lora"):
         if name not in paths:
             raise SystemExit(f"missing {name}")
@@ -60,6 +61,7 @@ def compare(paths: dict[str, Path], *, n_resamples: int = 10000, seed: int = 0) 
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Write comparison.json for the measured files passed on the command line."""
     parser = argparse.ArgumentParser(description="Bootstrap measured Orbit runs")
     parser.add_argument("--single", type=Path, required=True)
     parser.add_argument("--team", type=Path, required=True)

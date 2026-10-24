@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from orbit_agents.engine import claims_are_grounded
+from orbit_agents.engine import RunResult, claims_are_grounded
 
 DIGIT_RE = re.compile(r"\d")
 
@@ -15,17 +15,14 @@ def _claim_key(claim: dict) -> tuple:
     return (claim["name"], "text", claim["text"], claim["citation"])
 
 
-def score_task(task: dict, result) -> dict:
+def score_task(task: dict, result: RunResult) -> dict:
+    """Score one run against gold that was computed from the tools."""
     valid = int(getattr(result, "schema_valid"))
     invalid = int(getattr(result, "schema_invalid"))
     total = valid + invalid
     schema_rate = (valid / total) if total else None
     if task["expect_refusal"]:
-        success = (
-            result.status == "refuse"
-            and not result.claims
-            and DIGIT_RE.search(result.answer) is None
-        )
+        success = result.status == "refuse" and not result.claims and DIGIT_RE.search(result.answer) is None
     else:
         gold = [_claim_key(claim) for claim in task["gold_claims"]]
         got = [_claim_key(claim) for claim in result.claims]

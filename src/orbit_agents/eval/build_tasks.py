@@ -36,6 +36,7 @@ def _answer(claims: list[dict]) -> str:
 
 
 def expand(task: dict, workspace: Path) -> dict:
+    """Turn one catalog row into a task file entry. Gold comes from running the tools."""
     split = "test" if task["subset"] == "test" else "dev"
     if task["refusal"]:
         return {
@@ -134,6 +135,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 def build(workspace: Path | None = None) -> dict:
+    """Write eval/dev.jsonl, eval/test.jsonl, and the manifest from the catalog."""
     scratch = workspace or (ROOT / "traces" / "build")
     scratch.mkdir(parents=True, exist_ok=True)
     write_manifest()
@@ -200,6 +202,7 @@ def build(workspace: Path | None = None) -> dict:
 
 
 def main() -> None:
+    """Rebuild the task files and print the manifest."""
     print(json.dumps(build(), indent=2))
 
 

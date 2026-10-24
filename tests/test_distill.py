@@ -25,7 +25,6 @@ from distill_teacher import (
     SERVER_ATTEMPTS,
     SERVER_BACKOFF_SECONDS,
     AnthropicClient,
-    BillingStop,
     BudgetStop,
     CostStop,
     DistillStop,
@@ -219,10 +218,7 @@ def test_http_400_stops_and_is_not_retried():
 
 def test_http_404_stops_with_the_model_message():
     calls = {"n": 0}
-    message = (
-        "models/gemini-2.5-flash is no longer available to new users, "
-        "use models/gemini-3.8-flash"
-    )
+    message = "models/gemini-2.5-flash is no longer available to new users, use models/gemini-3.8-flash"
 
     def transport(url, headers, payload, timeout):
         del headers, payload, timeout
@@ -297,8 +293,7 @@ def _minute_429(delay=54):
         "error": {
             "status": "RESOURCE_EXHAUSTED",
             "message": (
-                "Quota exceeded generate_content_free_tier_requests, "
-                f"limit: 5 per minute. Please retry in {delay}s"
+                f"Quota exceeded generate_content_free_tier_requests, limit: 5 per minute. Please retry in {delay}s"
             ),
         }
     }
@@ -519,11 +514,7 @@ def test_per_day_429_saves_a_checkpoint(monkeypatch, tmp_path):
     def transport(url, headers, payload, timeout):
         del url, headers, payload, timeout
         calls["n"] += 1
-        return 429, {
-            "error": {
-                "message": "Quota exceeded generate_content_free_tier_requests, limit: 20 per day."
-            }
-        }
+        return 429, {"error": {"message": "Quota exceeded generate_content_free_tier_requests, limit: 20 per day."}}
 
     output = tmp_path / "out"
     with pytest.raises(SystemExit) as caught:
@@ -596,10 +587,7 @@ def test_preflight_404_stops_before_any_task(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("ORBIT_TEACHER_API_KEY", "test-key")
     task = task_by_id("dev-001")
     monkeypatch.setattr("distill_teacher.load_pool", lambda _workspace: [dict(task)])
-    message = (
-        "models/gemini-2.5-flash is no longer available to new users, "
-        "use models/gemini-3.8-flash"
-    )
+    message = "models/gemini-2.5-flash is no longer available to new users, use models/gemini-3.8-flash"
     calls = []
 
     def transport(url, headers, payload, timeout):
@@ -914,12 +902,15 @@ def test_anthropic_request_uses_the_messages_api():
         return 200, _anthropic_body('{"ok": true}')
 
     client = _anthropic_client(_fast_budget(), transport)
-    assert client.generate(
-        [
-            {"role": "system", "content": "You are the planner."},
-            {"role": "user", "content": "Task: count the trays."},
-        ]
-    ) == '{"ok": true}'
+    assert (
+        client.generate(
+            [
+                {"role": "system", "content": "You are the planner."},
+                {"role": "user", "content": "Task: count the trays."},
+            ]
+        )
+        == '{"ok": true}'
+    )
     assert seen["url"] == "https://api.anthropic.com/v1/messages"
     assert "key=" not in seen["url"]
     assert seen["headers"]["x-api-key"] == "test-key"
@@ -1105,7 +1096,7 @@ def test_anthropic_text_blocks_ignore_thinking_and_extra_usage():
                 {"type": "redacted_thinking", "data": "hidden"},
                 {"text": "ignored because it has no type"},
                 {"type": "text", "text": ["not a string"]},
-                {"type": "text", "text": "{\"ok\": true}"},
+                {"type": "text", "text": '{"ok": true}'},
             ],
             "usage": {
                 "input_tokens": 20,
@@ -1130,7 +1121,7 @@ def test_anthropic_text_blocks_ignore_thinking_and_extra_usage():
 def test_anthropic_string_content_and_odd_usage_do_not_crash():
     def transport(url, headers, payload, timeout):
         del url, headers, payload, timeout
-        return 200, {"content": "{\"a\": 1}", "usage": ["not", "a", "dict"], "stop_reason": "end_turn"}
+        return 200, {"content": '{"a": 1}', "usage": ["not", "a", "dict"], "stop_reason": "end_turn"}
 
     client = _anthropic_client(_fast_budget(), transport)
     assert client.generate([{"role": "user", "content": "Task: one"}]) == '{"a": 1}'
@@ -1337,7 +1328,10 @@ def test_oracle_teacher_is_kept_for_count_log_refusal_and_multi(tmp_path):
         assert transcript["extracted"]["claims"] == task["gold_claims"]
         assert transcript["expected"]["gold_claims"] == task["gold_claims"]
         assert transcript["checker"]["success"] is True
-        assert any(event["agent"] == "tool" and event["kind"] == "result" for event in transcript["events"]) or task["expect_refusal"]
+        assert (
+            any(event["agent"] == "tool" and event["kind"] == "result" for event in transcript["events"])
+            or task["expect_refusal"]
+        )
         contracts = [
             message["content"]
             for example in transcript["examples"]

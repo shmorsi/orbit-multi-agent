@@ -6,6 +6,7 @@ import argparse
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Dispatch doctor, serve, traces, and score."""
     parser = argparse.ArgumentParser(prog="orbit", description="Orbit: Multi-Agent Mission Control")
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="Check Python, device, and one tiny task")

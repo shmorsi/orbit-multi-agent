@@ -10,6 +10,7 @@ from orbit_agents.corpus import load_table, read_text
 
 
 def main() -> None:
+    """Read one program on stdin, run it with the corpus helpers, and print JSON."""
     code = sys.stdin.read()
     buffer = io.StringIO()
 

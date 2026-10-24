@@ -26,7 +26,8 @@ def _row_ok(row: dict, spec: dict) -> bool:
     raise ValueError(op)
 
 
-def evaluate(spec: dict):
+def evaluate(spec: dict) -> int | str:
+    """Run one gold operation on the corpus. The scripted worker has to match it."""
     op = spec["op"]
     if op == "count_rows":
         return sum(1 for row in load_table(spec["table"]) if _row_ok(row, spec))
@@ -43,28 +44,23 @@ def evaluate(spec: dict):
 
 
 def render_python(spec: dict) -> str:
+    """The Python source the scripted worker runs for this spec."""
     op = spec["op"]
     if op == "count_text":
         return (
-            f"body = text({spec['file']!r})\n"
-            f"print(sum(1 for line in body.splitlines() if {spec['needle']!r} in line))"
+            f"body = text({spec['file']!r})\nprint(sum(1 for line in body.splitlines() if {spec['needle']!r} in line))"
         )
     clauses = []
     for key, value in spec.get("where", {}).items():
         clauses.append(f"row[{key!r}] == {value!r}")
     compare = spec.get("compare")
     if compare:
-        clauses.append(
-            f"int(row[{compare['field']!r}]) {_CMP[compare['op']]} {int(compare['value'])}"
-        )
+        clauses.append(f"int(row[{compare['field']!r}]) {_CMP[compare['op']]} {int(compare['value'])}")
     condition = " and ".join(clauses) if clauses else "True"
     table = spec["table"]
     if op == "count_rows":
         return f"rows = table({table!r})\nprint(sum(1 for row in rows if {condition}))"
     if op == "sum_field":
         field = spec["field"]
-        return (
-            f"rows = table({table!r})\n"
-            f"print(sum(int(row[{field!r}]) for row in rows if {condition}))"
-        )
+        return f"rows = table({table!r})\nprint(sum(int(row[{field!r}]) for row in rows if {condition}))"
     raise ValueError(op)
