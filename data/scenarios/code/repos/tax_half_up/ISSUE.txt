@@ -1,0 +1,1 @@
+tax_cents(price_cents, rate_bps) must round half up to the nearest cent. rate_bps is basis points.

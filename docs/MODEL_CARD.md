@@ -10,6 +10,12 @@ The student is the three-role team: planner, worker, and critic. Training dialog
 
 A distillation path asks a teacher (Claude by default, Gemini as an option) to produce trajectories on train and tune tasks only. That score is not in yet. The distill config sets `max_seq_length` to 1536. The trainer refuses a shorter cap, because truncation drops the assistant turn. The notebook is `notebooks/run_distill_and_score.ipynb`.
 
+## Orbit Code and the boardroom
+
+Orbit Code is a planner, coder, test runner, and reviewer. The reviewer is code: it rejects a patch whose tests fail or whose diff touches the tests. The frozen split is `data/scenarios/code/`, protocol `code-eval-v1`. It has not been scored. `python -m orbit_agents.eval.score_code --dry-run` prints the request bound and the cost cap and writes nothing. A measured file would land in `results/code/<model>/<config>.json`. Until that file exists, the README says pending, not scored.
+
+The boardroom is a scripted demo on fictional company files. The auditor refuses a claim the cited file does not support. It is not a model score.
+
 ## What was not trained
 
 The three-role team and the six-role team have each been scored once as an API policy. The files are under `results/v3_api/`. The round table has not been scored. `make score-v3` is the command that would score it once, with `ANTHROPIC_API_KEY` or `ORBIT_ANTHROPIC_API_KEY`. Until `results/v3_api/<model>/team_v3.json` is a measured model eval, the README says the round-table team is not scored.
@@ -24,7 +30,7 @@ The frozen test is protocol `team-eval-v1`. See [EVAL.md](EVAL.md) and `eval/PRO
 
 Use it to inspect a grounding gate, a role split, and a frozen eval. Do not use the archived task-success numbers as evidence that fine-tuning improved answers. The README states that the task-success interval includes zero. The test set is small. Each measured config was trained once. The free-T4 wall clock has not been measured.
 
-The corpus is fictional. The tool path does not open a socket. The teacher script is the piece that calls a model API, and only with a train or tune prompt.
+The makerspace corpus is fictional. The checkout outage and the Northline boardroom are fictional too. The tool path does not open a socket. The code test runner also blocks network connects and is killed on timeout. The teacher script is the piece that calls a model API, and only with a train or tune prompt. Scoring Orbit Code is a separate command and needs `ORBIT_ANTHROPIC_API_KEY`.
 
 ## Ethical notes
 

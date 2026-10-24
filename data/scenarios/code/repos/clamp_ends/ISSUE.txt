@@ -1,0 +1,1 @@
+clamp(value, low, high) must keep value inside low and high, inclusive.

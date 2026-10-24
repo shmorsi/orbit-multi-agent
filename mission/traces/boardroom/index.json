@@ -1,0 +1,11 @@
+[
+  {
+    "file": "memo.jsonl",
+    "team": "boardroom",
+    "scenario": "boardroom",
+    "task_id": "board-launch",
+    "status": "answer",
+    "question": "Should Northline ship the launch, and which figures in the files support that call?",
+    "note": "scripted demo on fictional company files, not a model score"
+  }
+]

@@ -1,0 +1,1 @@
+Counter.add must increment that key and keep the other keys.

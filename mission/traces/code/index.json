@@ -1,0 +1,22 @@
+[
+  {
+    "file": "repair.jsonl",
+    "team": "code",
+    "scenario": "code",
+    "task_id": "sum-inclusive",
+    "status": "answer",
+    "outcome": "accept",
+    "question": "sum_to(n) must add every integer from 1 through n, including n.",
+    "note": "scripted demo following the oracle, not a model score"
+  },
+  {
+    "file": "reject.jsonl",
+    "team": "code",
+    "scenario": "code",
+    "task_id": "sum-inclusive",
+    "status": "refuse",
+    "outcome": "reject",
+    "question": "sum_to(n) must add every integer from 1 through n, including n.",
+    "note": "scripted demo following the oracle, not a model score"
+  }
+]

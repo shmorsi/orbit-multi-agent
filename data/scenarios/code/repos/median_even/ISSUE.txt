@@ -1,0 +1,1 @@
+median of an odd list is the middle value. median of an even list is the average of the two middle values.

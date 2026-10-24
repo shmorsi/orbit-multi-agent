@@ -25,7 +25,7 @@ from fontTools.varLib.instancer import instantiateVariableFont  # noqa: E402
 
 from orbit_agents.engine import MAX_CRITIC_RETRIES, MAX_SCHEMA_TRIES, MAX_TURNS  # noqa: E402
 from orbit_agents.eval.readme import display_number  # noqa: E402
-from orbit_agents.schema import PLANNER_SCHEMA, TOOL_NAMES  # noqa: E402
+from orbit_agents.schema import PLANNER_SCHEMA  # noqa: E402
 
 FONT = ROOT / "mission" / "fonts" / "inter-tight-latin.woff2"
 HERO = ROOT / "docs" / "hero.svg"
@@ -274,18 +274,11 @@ def hero_svg(root: Path = ROOT) -> str:
     canvas = Canvas(1200, 560, "Orbit", desc)
     canvas.grid()
     canvas.rule(56, 1144, 48)
-    canvas.text("ORBIT", 56, 82, 13, weight=640, tracking=3.4)
+    canvas.text("ORBIT CODE", 56, 82, 13, weight=640, tracking=3.4)
     canvas.text("MULTI-AGENT MISSION CONTROL", 1144, 82, 12, weight=560, fill=MUTED, tracking=2.2, anchor="end")
-    canvas.text("Answers only what the tools support.", 56, 178, 52, weight=640, tracking=-1.0)
-    canvas.text(
-        "A local planner, worker, and critic. Every turn is one JSON object.",
-        56,
-        222,
-        18,
-        weight=440,
-        fill=MUTED,
-    )
-    canvas.text("Six sandboxed tools. A gate that refuses the rest.", 56, 250, 18, weight=440, fill=MUTED)
+    canvas.text("Fixes real code.", 56, 168, 52, weight=640, tracking=-1.0)
+    canvas.text("Refuses a patch that fails its tests.", 56, 214, 26, weight=560, fill=MUTED, tracking=-0.3)
+    canvas.text("Code benchmark pending, not scored. Makerspace figures below are measured.", 56, 252, 16, weight=440, fill=DIM)
     canvas.rule(56, 1144, 286)
 
     columns = (
@@ -335,17 +328,17 @@ def hero_svg(root: Path = ROOT) -> str:
 def architecture_svg() -> str:
     steps = int(PLANNER_SCHEMA["properties"]["steps"]["maxItems"])
     desc = (
-        "Task to planner to worker to critic to the grounding gate to a JSONL trace. "
-        f"Tools: {', '.join(TOOL_NAMES)}. "
+        "Issue to planner to coder to the test runner to the critic to the reviewer. "
+        "The reviewer is the grounding gate: tests must pass, and the diff must not touch the tests. "
         f"Limits: {MAX_TURNS} turns, {MAX_CRITIC_RETRIES} revise passes, {MAX_SCHEMA_TRIES} schema tries, "
-        f"planner at most {steps} steps."
+        f"planner at most {steps} steps. Pytest runs with a timeout and no network."
     )
     canvas = Canvas(1200, 680, "Orbit architecture", desc)
     canvas.grid()
     canvas.text("ARCHITECTURE", 56, 52, 12, weight=560, fill=DIM, tracking=2.4)
-    canvas.text("One bus. Four checks.", 56, 96, 36, weight=640, tracking=-0.6)
+    canvas.text("Orbit Code.", 56, 96, 36, weight=640, tracking=-0.6)
     canvas.text(
-        "JSON schema on every turn. Sandboxed tools. Critic revisions. A grounding gate.",
+        "Planner, coder, test runner, critic. The reviewer is the grounding gate.",
         56,
         132,
         16,
@@ -354,12 +347,12 @@ def architecture_svg() -> str:
     )
 
     nodes = (
-        ("01", "Task", "the question", False),
+        ("01", "Issue", "the bug", False),
         ("02", "Planner", f"at most {steps} steps", False),
-        ("03", "Worker", "one call or a final", False),
-        ("04", "Critic", "accept or revise", False),
-        ("05", "Gate", "supported claim", True),
-        ("06", "Trace", "JSONL", False),
+        ("03", "Coder", "edits source", False),
+        ("04", "Tests", "no network", False),
+        ("05", "Critic", "accept or revise", False),
+        ("06", "Reviewer", "ship or refuse", True),
     )
     box_w, box_h = 160, 88
     gap = 28
@@ -404,9 +397,10 @@ def architecture_svg() -> str:
 
     panel_y = 360
     canvas.rect(48, panel_y, 1104, 112, LINE)
-    canvas.text("SANDBOXED TOOLS", 72, panel_y + 28, 11, weight=560, fill=DIM, tracking=1.8)
+    canvas.text("SANDBOX", 72, panel_y + 28, 11, weight=560, fill=DIM, tracking=1.8)
     chip_gap = 12
-    chip_sizes = [(name, canvas.faces[560].width(name, 14, 0.2) + 28) for name in TOOL_NAMES]
+    chip_names = ("planner", "coder", "pytest", "critic", "reviewer")
+    chip_sizes = [(name, canvas.faces[560].width(name, 14, 0.2) + 28) for name in chip_names]
     chip_row = sum(width for _name, width in chip_sizes) + chip_gap * (len(chip_sizes) - 1)
     chip_x = 48 + (1104 - chip_row) / 2
     for name, chip_w in chip_sizes:
@@ -414,7 +408,7 @@ def architecture_svg() -> str:
         canvas.text(name, chip_x + 14, panel_y + 68, 14, weight=560, fill=INK, tracking=0.2)
         chip_x += chip_w + chip_gap
     canvas.text(
-        "web_search reads a bundled cache. No tool in this path opens a socket.",
+        "The coder edits a temp workspace. Pytest has a timeout and no network.",
         72,
         panel_y + 100,
         13,
@@ -427,11 +421,11 @@ def architecture_svg() -> str:
             56,
             "JSON SCHEMA",
             False,
-            "Planner, worker, and critic",
+            "Planner, coder, and critic",
             f"each return one object. {MAX_SCHEMA_TRIES} tries on a bad turn.",
         ),
-        (448, "CRITIC", False, "Accept a grounded claim,", f"or send it back, at most {MAX_CRITIC_RETRIES} times."),
-        (840, "GROUNDING GATE", True, "A cited result, a printed count,", "or a matching line count. Else refuse."),
+        (448, "CRITIC", False, "Accept a passing edit,", f"or send it back, at most {MAX_CRITIC_RETRIES} times."),
+        (840, "GROUNDING GATE", True, "Tests must pass, and the diff", "must not touch the tests."),
     )
     for x, label, accent, line_one, line_two in notes:
         canvas.text(label, x, 516, 12, weight=560, fill=ACCENT if accent else DIM, tracking=1.6)

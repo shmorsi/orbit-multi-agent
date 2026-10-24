@@ -265,14 +265,102 @@ def bundled_traces_incident(directory: Path | None = None) -> list[Path]:
     return written
 
 
+TRACE_DIR_CODE = TRACE_DIR / "code"
+TRACE_DIR_BOARD = TRACE_DIR / "boardroom"
+
+
+def write_trace_code(path: Path, task: dict, *, mode: str, harness: str | None = None) -> Path:
+    """Run the scripted code team and write JSONL. mode is repair or tamper."""
+    import shutil
+
+    from orbit_agents.code_team import dump_code_trace, run_code_team
+    from orbit_agents.scripted_code import ScriptedCodePolicy
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workspace = path.parent / ".runs" / path.stem
+    result = run_code_team(task, ScriptedCodePolicy(task, mode=mode), workspace)
+    path.write_text(dump_code_trace(task, result, harness=harness), encoding="utf-8")
+    shutil.rmtree(workspace, ignore_errors=True)
+    return path
+
+
+def bundled_traces_code(directory: Path | None = None) -> list[Path]:
+    """Scripted code traces: a repair that ends green, and a test-edit the reviewer rejects."""
+    from orbit_agents.codebench import task_by_id
+
+    directory = directory or TRACE_DIR_CODE
+    directory.mkdir(parents=True, exist_ok=True)
+    task = task_by_id("sum-inclusive")
+    specs = (("repair.jsonl", "repair"), ("reject.jsonl", "tamper"))
+    written = []
+    index = []
+    for name, mode in specs:
+        path = write_trace_code(directory / name, task, mode=mode, harness="scripted_harness")
+        header = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+        written.append(path)
+        index.append(
+            {
+                "file": path.name,
+                "team": "code",
+                "scenario": "code",
+                "task_id": header["task_id"],
+                "status": header["status"],
+                "outcome": "accept" if mode == "repair" else "reject",
+                "question": header["question"],
+                "note": "scripted demo following the oracle, not a model score",
+            }
+        )
+    (directory / "index.json").write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    return written
+
+
+def write_trace_boardroom(path: Path, task: dict, *, harness: str | None = None) -> Path:
+    """Run the scripted board and write JSONL."""
+    from orbit_agents.boardroom import dump_board_trace, run_boardroom
+    from orbit_agents.scripted_boardroom import BoardroomPolicy
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    result = run_boardroom(task, BoardroomPolicy(task))
+    path.write_text(dump_board_trace(task, result, harness=harness), encoding="utf-8")
+    return path
+
+
+def bundled_traces_boardroom(directory: Path | None = None) -> list[Path]:
+    """One scripted decision memo. The auditor refuses the planted revenue claim."""
+    from orbit_agents.boardroom import task_by_id
+
+    directory = directory or TRACE_DIR_BOARD
+    directory.mkdir(parents=True, exist_ok=True)
+    task = task_by_id("board-launch")
+    path = write_trace_boardroom(directory / "memo.jsonl", task, harness="scripted_harness")
+    header = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    index = [
+        {
+            "file": path.name,
+            "team": "boardroom",
+            "scenario": "boardroom",
+            "task_id": header["task_id"],
+            "status": header["status"],
+            "question": header["question"],
+            "note": "scripted demo on fictional company files, not a model score",
+        }
+    ]
+    (directory / "index.json").write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    return [path]
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Rewrite the bundled traces for v1, v2, the round table, or the incident demo."""
+    """Rewrite the bundled traces for v1, v2, the round table, the incident, code, or the boardroom."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Rewrite the bundled scripted-harness traces")
-    parser.add_argument("--team", choices=("v1", "v2", "v3", "incident"), default="v1")
+    parser.add_argument("--team", choices=("v1", "v2", "v3", "incident", "code", "boardroom"), default="v1")
     args = parser.parse_args(argv)
-    if args.team == "incident":
+    if args.team == "boardroom":
+        paths = bundled_traces_boardroom()
+    elif args.team == "code":
+        paths = bundled_traces_code()
+    elif args.team == "incident":
         paths = bundled_traces_incident()
     elif args.team == "v3":
         paths = bundled_traces_v3()

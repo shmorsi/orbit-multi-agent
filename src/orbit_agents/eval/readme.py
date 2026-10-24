@@ -315,6 +315,76 @@ def _pending(root: Path) -> list[str]:
     return lines
 
 
+CODE_CONFIGS = (
+    ("single", "Single agent"),
+    ("team", "Team with reviewer"),
+)
+
+
+def _measured_code(payload: dict | None) -> bool:
+    return _measured(payload) and payload.get("protocol") == "code-eval-v1"
+
+
+def _code_cells(payload: dict) -> tuple[str, str]:
+    usage = payload.get("usage") or {}
+    tokens = ""
+    if isinstance(usage.get("input_tokens"), int) and isinstance(usage.get("output_tokens"), int):
+        tokens = f"{display_number(usage['input_tokens'])} in, {display_number(usage['output_tokens'])} out"
+    cost = usage.get("estimated_cost_usd")
+    cost_cell = ""
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+        cost_cell = display_number(cost)
+    return tokens, cost_cell
+
+
+def _code(root: Path) -> list[str]:
+    """Orbit Code rows. Pending slots have no number."""
+    lines = [
+        "Orbit Code, frozen split `code-eval-v1`. A row is filled only from a measured file under `results/code/`. "
+        "Anything else is pending, not scored.",
+        "",
+        "| Config | Model | pass@1 | Tests-passed rate | Reviewer rejections | Tokens | Cost USD |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    folder = root / "results" / "code"
+    measured: list[dict] = []
+    if folder.is_dir():
+        for model_dir in sorted(path for path in folder.iterdir() if path.is_dir()):
+            for key, _label in CODE_CONFIGS:
+                payload = _read(model_dir / f"{key}.json")
+                if _measured_code(payload):
+                    measured.append(payload)
+    if not measured:
+        lines.extend(
+            [
+                "| Single agent | pending | pending, not scored | | | | |",
+                "| Team with reviewer | pending | pending, not scored | | | | |",
+                "| Single agent, local Qwen | pending | pending, not scored | | | | |",
+            ]
+        )
+        return lines
+    for payload in measured:
+        tokens, cost = _code_cells(payload)
+        lines.append(
+            f"| {payload.get('config_label', payload['config'])} | `{payload['model']}` | "
+            f"{display_number(payload['pass_at_1'])} | {display_number(payload['tests_passed_rate'])} | "
+            f"{display_number(payload['n_reviewer_rejections'])} of {display_number(payload['n_tasks'])} | "
+            f"{tokens} | {cost} |"
+        )
+    have_single = any(item.get("config") == "single" and item.get("provider") != "transformers" for item in measured)
+    have_team = any(item.get("config") == "team" for item in measured)
+    have_qwen = any(
+        item.get("provider") == "transformers" or "qwen" in str(item.get("model", "")).lower() for item in measured
+    )
+    if not have_single:
+        lines.append("| Single agent | pending | pending, not scored | | | | |")
+    if not have_team:
+        lines.append("| Team with reviewer | pending | pending, not scored | | | | |")
+    if not have_qwen:
+        lines.append("| Single agent, local Qwen | pending | pending, not scored | | | | |")
+    return lines
+
+
 def render(root: Path = ROOT) -> str:
     """Render the Key results block from the committed result files."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
@@ -324,6 +394,8 @@ def render(root: Path = ROOT) -> str:
             "Rates, losses, and intervals below are the committed values, shown to three decimal places. "
             "The JSON files hold the full values."
         ),
+        "",
+        *_code(root),
         "",
         *_v2(root, distill),
         "",

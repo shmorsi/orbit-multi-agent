@@ -67,6 +67,8 @@ def test_readme_numbers_come_from_committed_files():
         Path("data/manifest.json"),
         Path("finetune/data/manifest.json"),
         Path("finetune/configs/qlora_distill.json"),
+        Path("data/scenarios/code/manifest.json"),
+        Path("data/scenarios/boardroom/manifest.json"),
     ):
         allowed_outside |= _json_numbers(path)
 

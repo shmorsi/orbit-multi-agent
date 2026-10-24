@@ -35,3 +35,23 @@ make score-v3 MODEL=claude-haiku-5-5
 `ORBIT_ANTHROPIC_API_KEY` is accepted as well. If both are unset, the make targets exit before any request and name `ORBIT_ANTHROPIC_API_KEY`. Each command refuses an output file that is already measured, then refreshes the README block.
 
 The distill and training notebooks on a free Colab T4 are `notebooks/run_distill_and_score.ipynb` and `finetune/colab_train.ipynb`. They write under `results/v3_qwen1.5b/`. The T4 wall clock has not been measured.
+
+## Orbit Code
+
+Protocol id: `code-eval-v1`. The frozen files are under `data/scenarios/code/`. The manifest stores the bundle hash and the split tag. Hidden tests are not in the prompt. `make score-code-dry-run` checks that hash, prints the request bound and the cost cap, and writes nothing.
+
+```bash
+make score-code-dry-run MODEL=claude-haiku-5-5
+export ORBIT_ANTHROPIC_API_KEY=your-key
+make score-code MODEL=claude-haiku-5-5
+```
+
+`make score-code` writes `results/code/<model>/single.json` and `team.json` once each. A file that is already measured is refused. The README block then reads pass@1, the hidden-test pass rate, reviewer rejections, tokens, and cost from those files. Until a file is measured, the row says pending, not scored.
+
+A local Qwen dry-run, which does not load weights:
+
+```bash
+python -m orbit_agents.eval.score_code --config single --provider transformers --model Qwen/Qwen2.5-1.5B-Instruct --dry-run
+```
+
+The boardroom under `data/scenarios/boardroom/` is a scripted demo on fictional files. It is not a scored split.

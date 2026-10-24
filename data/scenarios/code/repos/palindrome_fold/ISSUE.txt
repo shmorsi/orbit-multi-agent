@@ -1,0 +1,1 @@
+is_palindrome must ignore letter case and spaces.
