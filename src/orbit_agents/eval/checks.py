@@ -26,7 +26,8 @@ def _row_ok(row: dict, spec: dict) -> bool:
     raise ValueError(op)
 
 
-def evaluate(spec: dict):
+def evaluate(spec: dict) -> int | str:
+    """Run one checker op over the corpus. The scripted python cell must print the same value."""
     op = spec["op"]
     if op == "count_rows":
         return sum(1 for row in load_table(spec["table"]) if _row_ok(row, spec))
@@ -43,6 +44,7 @@ def evaluate(spec: dict):
 
 
 def render_python(spec: dict) -> str:
+    """Render the python cell the scripted worker runs for this checker spec."""
     op = spec["op"]
     if op == "count_text":
         return (

@@ -11,6 +11,7 @@ class ScriptedBackend:
         self.remaining = list(task["oracle_calls"])
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
+        """Oracle reply for the v1 role. This is a harness, not a model."""
         del messages
         if role == "planner":
             return json.dumps({"steps": self.task["plan"]}, ensure_ascii=True)
@@ -42,6 +43,7 @@ class ReviseOnce(ScriptedBackend):
         self.revised = False
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
+        """One unsupported draft, then the oracle. Used to show the critic."""
         if role == "worker" and not self.remaining and not self.sent_bad_final:
             self.sent_bad_final = True
             return json.dumps(

@@ -1,3 +1,6 @@
+"""Repository paths. ROOT is the checkout that contains this package.
+"""
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]

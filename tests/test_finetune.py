@@ -1,12 +1,10 @@
+import ast
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-import ast
-
 import pytest
-
 from leakage import BUILT_FROM, check, overlap_error
 from train import guard_seq_length, map_training_kwargs, mask_assistant_tokens, seq_length_error
 
@@ -202,3 +200,41 @@ def test_notebook_trains_the_medium_config_once():
     assert "--split tune" in blob
     assert "import orbit_agents, os" in blob
     assert "qlora_small.json" not in blob
+    assert "colab-badge.svg" in blob
+    assert "results/v3_qwen1.5b/single_base.json" in blob
+    assert "results/v3_qwen1.5b/team_base.json" in blob
+    assert "results/v3_qwen1.5b/team_lora.json" in blob
+    assert "results/v3_qwen1.5b/team_distill.json" in blob
+    assert "'--out', 'results/single_base.json'" not in blob
+    assert "already measured" in blob
+    assert "orbit_agents.eval.readme" in blob
+
+
+def test_distill_notebook_runs_the_existing_path_once():
+    notebook = json.loads(Path("notebooks/run_distill_and_score.ipynb").read_text(encoding="utf-8"))
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    sources = []
+    for cell in notebook["cells"]:
+        text = "".join(cell["source"])
+        sources.append(text)
+        if cell["cell_type"] == "code":
+            assert cell["outputs"] == []
+            ast.parse(text)
+    blob = "\n".join(sources)
+    assert "finetune/distill_teacher.py" in blob
+    assert "finetune/configs/qlora_distill.json" in blob
+    assert "orbit_agents.eval.run" in blob and "'--split', 'test'" in blob
+    assert "orbit_agents.eval.compare" in blob
+    assert "orbit_agents.eval.readme" in blob
+    assert "results/v3_qwen1.5b" in blob
+    assert "userdata.get(KEY_NAME)" in blob
+    assert "ORBIT_ANTHROPIC_API_KEY" in blob
+    assert "MAX_REQUESTS = 800" in blob
+    assert "TEACHER_MODEL = 'claude-haiku-5-5'" in blob
+    assert "test_sha256" in blob
+    assert "already measured" in blob
+    assert "Do not score the frozen test in a loop" in blob
+    assert "print(_key" not in blob and "sk-ant" not in blob
+    assert "colab-badge.svg" in blob
+    assert "Commit only these paths" in blob
