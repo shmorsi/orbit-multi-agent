@@ -7,9 +7,9 @@ import json
 from pathlib import Path
 
 from orbit_agents.corpus import write_manifest
+from orbit_agents.engine import claims_are_grounded, contains_number
 from orbit_agents.eval.catalog import CATALOG, REFUSAL
 from orbit_agents.eval.checks import evaluate, render_python
-from orbit_agents.engine import claims_are_grounded, contains_number
 from orbit_agents.paths import ROOT
 from orbit_agents.prompts import prompt_blob
 from orbit_agents.tools import call_tool
@@ -36,6 +36,7 @@ def _answer(claims: list[dict]) -> str:
 
 
 def expand(task: dict, workspace: Path) -> dict:
+    """Fill a task template with the values the checker and the scripted worker share."""
     split = "test" if task["subset"] == "test" else "dev"
     if task["refusal"]:
         return {
@@ -134,6 +135,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 def build(workspace: Path | None = None) -> dict:
+    """Rewrite the dev and test splits, the eval manifest, and the corpus manifest."""
     scratch = workspace or (ROOT / "traces" / "build")
     scratch.mkdir(parents=True, exist_ok=True)
     write_manifest()
@@ -200,6 +202,7 @@ def build(workspace: Path | None = None) -> dict:
 
 
 def main() -> None:
+    """Rebuild the frozen splits. Do not run this against a published checkout."""
     print(json.dumps(build(), indent=2))
 
 

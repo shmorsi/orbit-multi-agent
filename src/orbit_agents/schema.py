@@ -115,6 +115,7 @@ ROLE_SCHEMAS = {"planner": PLANNER_SCHEMA, "worker": WORKER_SCHEMA, "critic": CR
 
 
 def validate(schema: dict, payload: dict) -> None:
+    """Raise when the payload does not match the role schema."""
     jsonschema.validate(payload, schema)
 
 
@@ -122,7 +123,7 @@ def _known(payload: dict, allowed: set[str]) -> dict:
     return {key: value for key, value in payload.items() if key in allowed}
 
 
-def coerce_int(value):
+def coerce_int(value: object) -> object:
     """Whole numbers written as 5.0 or \"5\" are the integer 5. Booleans are not numbers."""
     if isinstance(value, bool) or isinstance(value, int):
         return value
@@ -133,7 +134,8 @@ def coerce_int(value):
     return value
 
 
-def normalize_citation(value):
+def normalize_citation(value: object) -> object:
+    """Rewrite spellings like 'call 1' to call_1. Other values pass through."""
     if not isinstance(value, str):
         return value
     match = re.fullmatch(r"(?i)call[\s_-]*([1-9]\d*)", value.strip())
@@ -191,6 +193,7 @@ def normalize_payload(role: str, payload: dict) -> dict:
 
 
 def check_worker(payload: dict) -> str | None:
+    """Return an error string when a worker payload breaks a role rule, else None."""
     try:
         validate(WORKER_SCHEMA, payload)
     except jsonschema.ValidationError as exc:
@@ -218,6 +221,7 @@ def check_worker(payload: dict) -> str | None:
 
 
 def check_role(role: str, payload: dict) -> str | None:
+    """Return an error string when the payload breaks that role's rules, else None."""
     if role == "worker":
         return check_worker(payload)
     try:
@@ -228,6 +232,7 @@ def check_role(role: str, payload: dict) -> str | None:
 
 
 def dumps(payload: dict) -> str:
+    """Serialize one payload the way the trace stores it."""
     return json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
 
 
@@ -291,6 +296,7 @@ def role_schema_v2(role: str, *, may_answer: bool = False) -> dict:
 
 
 def normalize_payload_v2(role: str, payload: dict) -> dict:
+    """Drop unknown keys and coerce claim spellings for a v2 role."""
     if not isinstance(payload, dict):
         return payload
     if role == "commander":
@@ -351,3 +357,131 @@ def check_role_v2(role: str, payload: dict, *, may_answer: bool = False) -> str 
     except jsonschema.ValidationError as exc:
         return exc.message
     return check_worker(payload)
+
+
+# ---------------------------------------------------------------------------
+# Team v3 round table. The v1 and v2 schemas above are unchanged.
+# Researcher may only read. Red-team and verifier have no tools.
+# ---------------------------------------------------------------------------
+
+ROLES_V3 = [
+    "coordinator",
+    "commander",
+    "researcher",
+    "scout",
+    "engineer",
+    "analyst",
+    "critic",
+    "redteam",
+    "verifier",
+    "auditor",
+]
+
+ROLE_TOOLS_V3: dict[str, tuple[str, ...]] = {
+    **ROLE_TOOLS,
+    "coordinator": (),
+    "researcher": ("retrieve", "read_file", "web_search"),
+    "redteam": (),
+    "verifier": (),
+}
+
+SPECIALISTS_V3 = ("researcher", "scout", "engineer", "analyst")
+
+COORDINATOR_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["brief"],
+    "properties": {"brief": {"type": "string", "minLength": 1, "maxLength": 400}},
+}
+
+REDTEAM_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["claim", "why"],
+    "properties": {
+        "why": {"type": "string", "minLength": 1, "maxLength": 400},
+        "claim": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["name", "value", "unit", "citation"],
+            "properties": {
+                "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                "value": {"type": "integer"},
+                "unit": {"type": "string", "minLength": 1, "maxLength": 40},
+                "citation": {"type": "string", "minLength": 1, "maxLength": 40},
+            },
+        },
+    },
+}
+
+VERIFIER_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["verdict", "reason"],
+    "properties": {
+        "verdict": {"type": "string", "enum": ["reject", "uphold"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 400},
+    },
+}
+
+COMMANDER_SCHEMA_V3 = json.loads(json.dumps(COMMANDER_SCHEMA))
+COMMANDER_SCHEMA_V3["properties"]["steps"]["items"]["properties"]["role"]["enum"] = list(SPECIALISTS_V3)
+
+
+def role_schema_v3(role: str, *, may_answer: bool = False) -> dict:
+    """JSON schema for one round-table turn. v2 roles keep their v2 schemas."""
+    if role == "coordinator":
+        return COORDINATOR_SCHEMA
+    if role == "redteam":
+        return REDTEAM_SCHEMA
+    if role == "verifier":
+        return VERIFIER_SCHEMA
+    if role == "commander":
+        return COMMANDER_SCHEMA_V3
+    if role == "researcher":
+        schema = json.loads(json.dumps(WORKER_SCHEMA))
+        schema["properties"]["tool"]["enum"] = list(ROLE_TOOLS_V3["researcher"])
+        schema["properties"]["action"]["enum"] = ["tool"]
+        return schema
+    return role_schema_v2(role, may_answer=may_answer)
+
+
+def check_role_v3(role: str, payload: dict, *, may_answer: bool = False) -> str | None:
+    """Validate a v3 turn. A tool outside the role's list is a validation error."""
+    if role == "commander":
+        try:
+            validate(COMMANDER_SCHEMA_V3, payload)
+        except jsonschema.ValidationError as exc:
+            return exc.message
+        for step in payload["steps"]:
+            if step["tool"] not in ROLE_TOOLS_V3[step["role"]]:
+                allowed = ", ".join(ROLE_TOOLS_V3[step["role"]])
+                return f"step {step['goal']!r}: {step['role']} may use only {allowed}"
+        return None
+    if role in {"coordinator", "redteam", "verifier"}:
+        try:
+            validate(role_schema_v3(role), payload)
+        except jsonschema.ValidationError as exc:
+            return exc.message
+        return None
+    if role == "researcher":
+        if isinstance(payload, dict):
+            denied = _permission_error_v3(role, payload)
+            if denied:
+                return denied
+        try:
+            validate(role_schema_v3(role), payload)
+        except jsonschema.ValidationError as exc:
+            return exc.message
+        return check_worker(payload)
+    return check_role_v2(role, payload, may_answer=may_answer)
+
+
+def _permission_error_v3(role: str, payload: dict) -> str | None:
+    tool = payload.get("tool")
+    if payload.get("action") == "tool" and isinstance(tool, str) and tool not in ROLE_TOOLS_V3[role]:
+        allowed = ", ".join(ROLE_TOOLS_V3[role])
+        return f"{role} may use only {allowed}; {tool} is not allowed"
+    if payload.get("action") == "final":
+        return f"{role} cannot give the final answer"
+    return None

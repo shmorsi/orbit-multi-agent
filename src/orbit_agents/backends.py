@@ -22,6 +22,7 @@ def pick_device(torch_module=None) -> str:
 
 
 def inference_dtype(device: str, torch_module):
+    """fp32 on CPU, bf16 on CUDA when the GPU supports it, otherwise fp16."""
     if device == "cpu":
         return torch_module.float32
     if device == "cuda" and torch_module.cuda.is_bf16_supported():
@@ -55,6 +56,7 @@ def torchao_is_compatible(version: str | None) -> bool:
 
 
 def assert_torchao_allows_peft() -> None:
+    """Raise when the installed torchao is the build peft cannot load."""
     try:
         import torchao
     except ImportError as exc:
@@ -126,6 +128,7 @@ class TransformersBackend:
         self.max_new_tokens = max_new_tokens
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
+        """Greedy local generation. The role is enforced by the caller, not the model."""
         del role
         torch = self.torch
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -150,6 +153,7 @@ class OllamaBackend:
             raise ValueError("Ollama must stay on localhost")
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
+        """One localhost Ollama chat completion."""
         del role
         body = json.dumps({"model": self.model, "messages": messages, "stream": False}).encode("utf-8")
         request = urllib.request.Request(
@@ -172,6 +176,7 @@ class LlamaCppBackend:
             raise ValueError("llama-server must stay on localhost")
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
+        """One localhost llama-server chat completion."""
         del role
         body = json.dumps(
             {"model": self.model, "messages": messages, "temperature": 0, "max_tokens": 256}

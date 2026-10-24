@@ -26,6 +26,18 @@ from orbit_agents.engine import extract_json
 from orbit_agents.paths import ROOT
 
 ANTHROPIC_KEY_ENV = "ORBIT_ANTHROPIC_API_KEY"
+ANTHROPIC_KEY_ENVS = ("ANTHROPIC_API_KEY", ANTHROPIC_KEY_ENV)
+
+
+def read_anthropic_api_key(explicit: str | None = None) -> str:
+    """The Anthropic key from the argument, then ANTHROPIC_API_KEY, then ORBIT_ANTHROPIC_API_KEY."""
+    if explicit is not None:
+        return explicit.strip()
+    for name in ANTHROPIC_KEY_ENVS:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 class LLMClient(ABC):
@@ -43,6 +55,7 @@ class LLMClient(ABC):
         return extract_json(self.complete_text(messages, schema, role=role))
 
     def usage(self) -> dict:
+        """Request and token counters. The default is an empty record."""
         return {}
 
 
@@ -55,6 +68,7 @@ class LegacyBackendPolicy(LLMClient):
         self.model = model
 
     def complete_text(self, messages: list[dict], schema: dict, *, role: str) -> str:
+        """Call the wrapped v1 backend. The schema is checked by the engine."""
         del schema
         return self.backend.complete(role=role, messages=messages)
 
@@ -69,6 +83,7 @@ class PolicyBackend:
         self.schemas = ROLE_SCHEMAS
 
     def complete(self, *, role: str, messages: list[dict]) -> str:
+        """v1 engine entry. It calls the policy with that role's schema."""
         return self.client.complete_text(messages, self.schemas[role], role=role)
 
 
@@ -89,7 +104,7 @@ class AnthropicPolicy(LLMClient):
     request pacing, a running USD estimate with a cost stop, and backoff on 429 and
     5xx, where each retry counts toward the cap. Unlike the teacher, this policy
     sends the role prompts and nothing else: no checker contract, no claim names,
-    and no gold values. The key comes from ORBIT_ANTHROPIC_API_KEY.
+    and no gold values. The key comes from ANTHROPIC_API_KEY or ORBIT_ANTHROPIC_API_KEY.
     """
 
     provider = "anthropic"
@@ -109,9 +124,11 @@ class AnthropicPolicy(LLMClient):
         log=None,
     ):
         teacher = _distill_teacher()
-        key = (api_key if api_key is not None else os.environ.get(ANTHROPIC_KEY_ENV, "")).strip()
+        key = read_anthropic_api_key(api_key)
         if not key:
-            raise SystemExit(f"Set {ANTHROPIC_KEY_ENV} to an Anthropic API key. Nothing is read from disk.")
+            raise SystemExit(
+                f"Set ANTHROPIC_API_KEY or {ANTHROPIC_KEY_ENV} to an Anthropic API key. Nothing is read from disk."
+            )
         self.model = model
         self.stops = (teacher.DistillStop,)
         self.budget = teacher.RequestBudget(
@@ -136,6 +153,7 @@ class AnthropicPolicy(LLMClient):
         self._preflight(self.client)
 
     def complete_text(self, messages: list[dict], schema: dict, *, role: str) -> str:
+        """One Messages API call. The schema is not sent to the provider."""
         del schema, role
         # The Messages API rejects an empty text turn, which a repair retry can carry.
         sent = [
@@ -144,6 +162,7 @@ class AnthropicPolicy(LLMClient):
         return self.client.generate(sent)
 
     def usage(self) -> dict:
+        """Requests, tokens, and the running cost estimate for this policy."""
         budget = self.budget
         return {
             "requests": budget.used,
@@ -180,6 +199,7 @@ class OpenAICompatiblePolicy(LLMClient):
         raise NotImplementedError(self.__class__.__doc__)
 
     def complete_text(self, messages: list[dict], schema: dict, *, role: str) -> str:
+        """Not implemented. Subclass this hook to add a provider."""
         raise NotImplementedError
 
 
@@ -239,6 +259,7 @@ PER_TASK_PROVIDERS = {"scripted"}
 
 
 def make_policy(provider: str, model: str | None = None, **kwargs) -> LLMClient:
+    """Build the named provider. Unknown names exit."""
     if provider not in PROVIDERS:
         raise SystemExit(f"unknown provider {provider}; choose one of {', '.join(PROVIDERS)}")
     return PROVIDERS[provider](model, **kwargs)

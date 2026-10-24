@@ -6,10 +6,11 @@ only for files under results/v3_qwen1.5b/ that are measured model evals; a
 missing or pending file renders as "not scored". Paired intervals appear only
 when that directory's comparison.json is measured.
 
-API-policy rows (results/v3_api/<model>/team_v1.json and team_v2.json, written
-once each by `python -m orbit_agents.eval.score_team`) appear only for measured
-files. With none measured, the block is unchanged and the "v2 team (6 roles)"
-row does not exist.
+API-policy rows (results/v3_api/<model>/team_v1.json, team_v2.json, and
+team_v3.json, written once each by `python -m orbit_agents.eval.score_team`)
+appear only for measured files. With none measured, the "v2 team (6 roles)"
+row does not exist. The round-table team stays "not scored" until team_v3.json
+is a measured model eval.
 
     python -m orbit_agents.eval.readme          # rewrite the block
     python -m orbit_agents.eval.readme --check  # fail if the block is stale
@@ -178,7 +179,21 @@ def _v3(root: Path) -> list[str]:
     return lines
 
 
-API_TEAMS = (("team_v1", "v1 team (3 roles)"), ("team_v2", "v2 team (6 roles)"))
+API_TEAMS = (
+    ("team_v1", "v1 team (3 roles)"),
+    ("team_v2", "v2 team (6 roles)"),
+    ("team_v3", "Round-table team"),
+)
+
+
+def _round_table(root: Path) -> list[str]:
+    """One sentence when no measured round-table file exists. No figure is invented."""
+    folder = root / "results" / "v3_api"
+    if folder.is_dir():
+        for model_dir in folder.iterdir():
+            if model_dir.is_dir() and _measured(_read(model_dir / "team_v3.json")):
+                return []
+    return ["", "The round-table team is not scored."]
 
 
 def _api(root: Path) -> list[str]:
@@ -224,12 +239,14 @@ def _api(root: Path) -> list[str]:
 
 
 def render(root: Path = ROOT) -> str:
+    """Render the Key results block from the committed result files."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
-    lines = [START, *_v2(root, distill), "", *_v3(root), *_api(root), END]
+    lines = [START, *_v2(root, distill), "", *_v3(root), *_round_table(root), *_api(root), END]
     return "\n".join(lines)
 
 
 def updated_readme(root: Path = ROOT) -> str:
+    """Return README.md with the Key results block replaced by render()."""
     text = (root / "README.md").read_text(encoding="utf-8")
     if not BLOCK_RE.search(text):
         raise SystemExit("README.md has no RESULTS_START/RESULTS_END block")
@@ -238,6 +255,7 @@ def updated_readme(root: Path = ROOT) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Rewrite or check the Key results block."""
     parser = argparse.ArgumentParser(description="Write the README results block from results/")
     parser.add_argument("--check", action="store_true", help="Fail if README.md does not match the results files")
     parser.add_argument("--root", type=Path, default=ROOT)

@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from orbit_agents.corpus import corpus_guide
-from orbit_agents.prompts import CRITIC_SYSTEM, PLANNER_SYSTEM, SINGLE_SYSTEM, WORKER_SYSTEM
+from orbit_agents.prompts import (
+    CRITIC_SYSTEM,
+    PLANNER_SYSTEM,
+    SINGLE_SYSTEM,
+    WORKER_SYSTEM,
+)
 from orbit_agents.schema import check_role, dumps, normalize_payload
 from orbit_agents.tools import call_tool
 
@@ -75,6 +80,7 @@ def extract_json(raw: str) -> dict:
 
 
 def contains_number(text: str, value: int) -> bool:
+    """True when the integer appears in the text as its own number."""
     number = int(value)
     if re.search(rf"(?<![\d.]){number}(?![\d.])", text):
         return True
@@ -88,6 +94,7 @@ def _number_token(token: str) -> str:
 
 
 def result_text(result: dict) -> str:
+    """Flatten a tool result into the text the gate searches."""
     return json.dumps(result, ensure_ascii=True)
 
 
@@ -292,6 +299,7 @@ def _value_supported(question: str, value: int, result: dict, blob: str) -> bool
 
 
 def claims_are_grounded(question: str, claims: list, results: list, answer: str) -> bool:
+    """True when every claim is supported by the cited tool result or the answer's counts."""
     supported: set[str] = set()
     for claim in claims:
         result = _cited_result(claim, results)
@@ -420,6 +428,7 @@ class TeamRun:
         return None
 
     def execute(self) -> RunResult:
+        """Run the planner, worker, and critic until the gate or a limit stops the team."""
         feedback = ""
         proposal = None
         if not self.single:
@@ -492,8 +501,10 @@ class TeamRun:
 
 
 def run_team(task: dict, backend, workspace: Path, on_event=None) -> RunResult:
+    """Run the three-role team and return the trace."""
     return TeamRun(task, backend, workspace, single=False, on_event=on_event).execute()
 
 
 def run_single(task: dict, backend, workspace: Path, on_event=None) -> RunResult:
+    """Run one model with the same tools and gate, and return the trace."""
     return TeamRun(task, backend, workspace, single=True, on_event=on_event).execute()

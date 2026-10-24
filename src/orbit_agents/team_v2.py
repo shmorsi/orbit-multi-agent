@@ -80,6 +80,7 @@ class TraceView:
 
     @classmethod
     def from_results(cls, question: str, results: list[dict]) -> TraceView:
+        """Freeze a copy of the tool results for the auditor."""
         frozen = tuple(MappingProxyType(copy.deepcopy(item)) for item in results)
         return cls(question=question, results=frozen)
 
@@ -259,6 +260,7 @@ class TeamV2Run:
         return None
 
     def execute(self) -> RunResult:
+        """Run the six-role team until the auditor or a limit stops it."""
         self.plan = self._plan()
         self._run_steps(self.plan)
         proposal = None
@@ -308,5 +310,6 @@ class TeamV2Run:
 
 
 def run_team_v2(task: dict, policy, workspace: Path, on_event=None) -> RunResult:
+    """Run the six-role team and return the trace."""
     return TeamV2Run(task, policy, workspace, on_event=on_event).execute()
 

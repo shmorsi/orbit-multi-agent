@@ -1,9 +1,8 @@
+import ast
 import json
 import subprocess
 import sys
 from pathlib import Path
-
-import ast
 
 from leakage import BUILT_FROM, check, overlap_error
 from train import map_training_kwargs
@@ -123,6 +122,14 @@ def test_notebook_trains_the_medium_config_once():
     assert "--split tune" in blob
     assert "import orbit_agents, os" in blob
     assert "qlora_small.json" not in blob
+    assert "colab-badge.svg" in blob
+    assert "results/v3_qwen1.5b/single_base.json" in blob
+    assert "results/v3_qwen1.5b/team_base.json" in blob
+    assert "results/v3_qwen1.5b/team_lora.json" in blob
+    assert "results/v3_qwen1.5b/team_distill.json" in blob
+    assert "'--out', 'results/single_base.json'" not in blob
+    assert "already measured" in blob
+    assert "orbit_agents.eval.readme" in blob
 
 
 def test_distill_notebook_runs_the_existing_path_once():
@@ -151,3 +158,5 @@ def test_distill_notebook_runs_the_existing_path_once():
     assert "already measured" in blob
     assert "Do not score the frozen test in a loop" in blob
     assert "print(_key" not in blob and "sk-ant" not in blob
+    assert "colab-badge.svg" in blob
+    assert "Commit only these paths" in blob
