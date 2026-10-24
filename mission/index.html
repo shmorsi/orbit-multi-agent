@@ -22,6 +22,7 @@
     <section class="stage-wrap">
       <p class="eyebrow">Task</p>
       <p id="question" class="question">Loading a saved engine trace.</p>
+      <p id="crew" class="crew"></p>
       <ol class="phases" id="phases">
         <li data-phase="planner">01 Planner</li>
         <li data-phase="worker">02 Worker</li>
@@ -48,6 +49,10 @@
         <span class="hud hud-br"></span>
       </div>
       <pre id="telemetry" class="telemetry">Awaiting uplink</pre>
+      <aside id="why" class="why" hidden>
+        <p class="eyebrow">Why refused</p>
+        <p id="why-text"></p>
+      </aside>
       <div class="controls">
         <button type="button" id="play" aria-pressed="false">Play</button>
         <button type="button" id="pause">Pause</button>

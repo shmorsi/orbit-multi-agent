@@ -36,6 +36,11 @@ def test_page_has_playback_and_reduced_motion():
     assert "/api/run" in script
     assert "traces/v2/index.json" in script
     assert "Team v2, six roles" in script
+    assert "traces/v3/index.json" in script
+    assert "Round table" in script
+    assert 'id="why"' in html
+    assert 'id="crew"' in html
+    assert 'placeSeats(next === "v3" ? V3_ROLES : V2_ROLES, next, reach)' in script
     assert 'data-phase="auditor"' in html
     assert "Inter Tight" in css
     assert Path("mission/fonts/inter-tight-latin.woff2").stat().st_size > 1000

@@ -30,6 +30,34 @@ const V2_ROLES = [
   ["auditor", "Auditor", "Audit"],
 ];
 
+const V3_ROLES = [
+  ["coordinator", "Coordinator", "Open"],
+  ["commander", "Commander", "Assign"],
+  ["researcher", "Researcher", "Read"],
+  ["scout", "Scout", "Search"],
+  ["engineer", "Engineer", "Code"],
+  ["analyst", "Analyst", "Draft"],
+  ["critic", "Critic", "Check"],
+  ["redteam", "Red team", "Attack"],
+  ["verifier", "Verifier", "Verify"],
+  ["auditor", "Auditor", "Gate"],
+];
+
+const ROLE_LINES = {
+  planner: "Writes the plan. Does not call tools.",
+  worker: "Calls a tool, or drafts the answer.",
+  critic: "Accepts the draft or sends it back.",
+  commander: "Assigns each step to the seat that owns that tool.",
+  scout: "Reads the corpus. Cannot run code.",
+  engineer: "Runs code or writes a file. Cannot answer.",
+  analyst: "Drafts the only answer the auditor scores.",
+  auditor: "Refuses a claim or a number the tools do not support.",
+  coordinator: "Opens the table. No tools and no answer.",
+  researcher: "Reads the corpus. Cannot run code or answer.",
+  redteam: "Proposes one claim the tools do not support.",
+  verifier: "The code gate re-checks that claim.",
+};
+
 const PHASE_LABELS = {
   v1: { planner: "01 Planner", worker: "02 Worker", tool: "03 Tool", critic: "04 Critic" },
   v2: {
@@ -39,11 +67,20 @@ const PHASE_LABELS = {
     critic: "04 Critic",
     auditor: "05 Auditor",
   },
+  v3: {
+    planner: "01 Coordinator",
+    worker: "02 Crew",
+    tool: "03 Tool",
+    critic: "04 Verifier",
+    auditor: "05 Auditor",
+  },
 };
 
 function teamOf(mission, events) {
   const rules = (mission && mission.flight_rules) || {};
-  if ((mission && mission.team) === "v2" || rules.team === "v2") return "v2";
+  const named = (mission && mission.team) || rules.team;
+  if (named === "v3" || named === "v2" || named === "v1") return named;
+  if (events.some((event) => event.agent === "coordinator" || event.agent === "redteam" || event.agent === "verifier")) return "v3";
   return events.some((event) => event.kind === "assign" || event.kind === "audit") ? "v2" : "v1";
 }
 
@@ -56,25 +93,22 @@ function setPhases(next) {
   });
 }
 
-function setTeam(next) {
-  team = next;
-  document.body.dataset.team = next;
-  setPhases(next);
+function clearRoundTable() {
   const stage = document.getElementById("stage");
-  stage.querySelectorAll(".seat.v2").forEach((node) => node.remove());
-  for (const seat of Object.values(V1_SEATS)) seat.hidden = next === "v2";
-  if (next !== "v2") {
-    seats = V1_SEATS;
-    return;
-  }
-  seats = {};
+  stage.querySelectorAll(".seat.v2, .seat.v3").forEach((node) => node.remove());
+  const links = document.getElementById("links");
+  if (links) links.remove();
+}
+
+function placeSeats(roles, className, reach) {
+  const stage = document.getElementById("stage");
   const anchor = document.getElementById("pulse-trail");
-  const reach = stage.clientWidth < 460 ? 34 : 38;
-  V2_ROLES.forEach(([key, label, verb], index) => {
-    const angle = -Math.PI / 2 + (index * Math.PI) / 3;
+  const placed = {};
+  roles.forEach(([key, label, verb], index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / roles.length;
     const seat = document.createElement("div");
-    seat.className = `seat v2 ${key}`;
-    seat.id = `seat-v2-${key}`;
+    seat.className = `seat ${className} ${key}`;
+    seat.id = `seat-${className}-${key}`;
     seat.style.left = `${50 + Math.cos(angle) * reach}%`;
     seat.style.top = `${50 + Math.sin(angle) * reach}%`;
     seat.append(label);
@@ -82,8 +116,30 @@ function setTeam(next) {
     small.textContent = verb;
     seat.append(small);
     stage.insertBefore(seat, anchor);
-    seats[key] = seat;
+    placed[key] = seat;
   });
+  return placed;
+}
+
+function setTeam(next) {
+  team = next;
+  document.body.dataset.team = next;
+  setPhases(next);
+  const stage = document.getElementById("stage");
+  clearRoundTable();
+  for (const seat of Object.values(V1_SEATS)) seat.hidden = next !== "v1";
+  if (next === "v1") {
+    seats = V1_SEATS;
+    return;
+  }
+  const narrow = stage.clientWidth < 460;
+  const reach = next === "v3" ? (narrow ? 36 : 40) : narrow ? 34 : 38;
+  seats = placeSeats(next === "v3" ? V3_ROLES : V2_ROLES, next, reach);
+  if (next !== "v3") return;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.id = "links";
+  svg.setAttribute("aria-hidden", "true");
+  stage.insertBefore(svg, document.getElementById("pulse-trail"));
 }
 
 if (params.get("shot")) document.body.classList.add("shot");
@@ -184,6 +240,14 @@ function routeV2(event) {
 }
 
 function route(event) {
+  if (team === "v3") {
+    if (event.kind === "gate") return "Red team → Verifier";
+    if (event.agent === "coordinator") return "Coordinator · open";
+    if (event.agent === "researcher") return "Researcher → Tool";
+    if (event.agent === "redteam") return "Red team · claim";
+    if (event.agent === "verifier") return "Verifier · model";
+    return routeV2(event);
+  }
   if (team === "v2") return routeV2(event);
   if (event.agent === "planner") return "Planner → Worker";
   if (event.agent === "tool") return "Tool → Worker";
@@ -199,13 +263,13 @@ function renderRules(rules) {
   const root = document.getElementById("rules");
   root.replaceChildren();
   if (!rules) return;
-  const v2 = rules.team === "v2";
+  const roster = rules.team === "v3" ? V3_ROLES : rules.team === "v2" ? V2_ROLES : null;
   const tools = (key) => {
     const list = (rules.permissions && rules.permissions[key]) || [];
     return list.length ? ` Tools: ${list.join(", ")}.` : "";
   };
-  const roleCards = v2
-    ? V2_ROLES.map(([key, label]) => [label, rules[key] ? `${rules[key]}${tools(key)}` : ""])
+  const roleCards = roster
+    ? roster.map(([key, label]) => [label, rules[key] ? `${rules[key]}${tools(key)}` : ""])
     : [["Planner", rules.planner], ["Worker", rules.worker], ["Critic", rules.critic]];
   const cards = [
     ...roleCards,
@@ -265,6 +329,14 @@ function pulse(fromName, toName) {
 
 function phaseOf(event) {
   if (!event) return null;
+  if (team === "v3") {
+    if (event.agent === "auditor" || event.kind === "audit" || event.kind === "final") return "auditor";
+    if (event.kind === "gate" || event.agent === "verifier" || event.agent === "redteam") return "critic";
+    if (event.agent === "critic" || event.kind === "revise") return "critic";
+    if (event.agent === "tool" || (event.payload && event.payload.action === "tool")) return "tool";
+    if (event.agent === "coordinator" || event.agent === "commander" || event.kind === "assign") return "planner";
+    return "worker";
+  }
   if (team === "v2") {
     if (event.agent === "auditor" || event.kind === "audit" || event.kind === "final") return "auditor";
     if (event.agent === "critic" || event.kind === "revise") return "critic";
@@ -282,6 +354,7 @@ function phaseOf(event) {
 
 function telemetryText(event) {
   if (!event) return "Awaiting uplink";
+  if (event.kind === "gate") return `GATE  ${event.code_verdict}\n${event.reason || ""}`;
   if (event.kind === "audit") {
     const lines = (event.findings || []).map(finding);
     return `AUDIT  ${event.verdict}\n${lines.join("\n")}`;
@@ -337,12 +410,13 @@ function focusAgentV2(event) {
   else if (event.kind === "revise" || verdict === "revise") pulse("critic", "analyst");
   else if (verdict === "accept") pulse("critic", "auditor");
   const auditor = seats.auditor;
+  if (event.kind === "gate") pulse("redteam", "verifier");
   if (event.kind === "audit" && auditor) auditor.dataset.verdict = event.verdict;
 }
 
 function focusAgent(event) {
   for (const seat of Object.values(seats)) seat.classList.remove("lit");
-  if (team === "v2") {
+  if (team === "v2" || team === "v3") {
     focusAgentV2(event);
     return;
   }
@@ -356,6 +430,44 @@ function focusAgent(event) {
   }
   if (event.agent === "tool") pulse("tool", "worker");
   if (event.agent === "critic") pulse("critic", "worker");
+}
+
+function drawLinks(shown) {
+  const svg = document.getElementById("links");
+  const stage = document.getElementById("stage");
+  if (!svg) return;
+  svg.setAttribute("viewBox", `0 0 ${stage.clientWidth} ${stage.clientHeight}`);
+  svg.replaceChildren();
+  const points = [];
+  for (const event of shown) {
+    const name = event.kind === "assign" ? event.role : event.agent === "tool" ? event.by : event.agent;
+    if (!seats[name]) continue;
+    const point = center(seats[name]);
+    const previous = points[points.length - 1];
+    if (!previous || previous.name !== name) points.push({ name, x: point.x, y: point.y });
+  }
+  for (let index = 1; index < points.length; index += 1) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", String(points[index - 1].x));
+    line.setAttribute("y1", String(points[index - 1].y));
+    line.setAttribute("x2", String(points[index].x));
+    line.setAttribute("y2", String(points[index].y));
+    if (index === points.length - 1) line.setAttribute("class", "live");
+    svg.append(line);
+  }
+}
+
+function refusalText(shown, mission) {
+  const bits = [];
+  const gate = [...shown].reverse().find((event) => event.kind === "gate" && event.code_verdict === "refuse");
+  if (gate) {
+    bits.push("The red team proposed a count the tool results do not contain. The code gate refused it. That claim is not the team's answer.");
+  }
+  const audit = [...shown].reverse().find((event) => event.kind === "audit" && event.verdict === "refuse");
+  if (audit) bits.push(audit.reason || "The auditor refused the draft because a claim or a number is not in the cited tool results.");
+  const done = shown.length > 0 && shown.length === state.events.length && mission && mission.status === "refuse";
+  if (done && !audit && mission.answer) bits.push(mission.answer);
+  return bits.join(" ");
 }
 
 function render() {
@@ -393,6 +505,34 @@ function render() {
   }
   const last = shown[shown.length - 1];
   paintPhase(shown);
+  if (team === "v3") drawLinks(shown);
+  const stage = document.getElementById("stage");
+  let verdict = null;
+  for (const event of shown) {
+    if (event.kind === "gate") verdict = event.code_verdict;
+    if (event.kind === "audit") verdict = event.verdict;
+  }
+  const flash = verdict === "refuse" ? "flash-refuse" : verdict === "pass" ? "flash-pass" : "";
+  if (flash) {
+    if (!stage.classList.contains(flash)) {
+      stage.classList.remove("flash-pass", "flash-refuse");
+      stage.classList.add(flash);
+    }
+  } else {
+    stage.classList.remove("flash-pass", "flash-refuse");
+  }
+  const crew = document.getElementById("crew");
+  if (crew) {
+    const name = last ? (last.agent === "tool" ? last.by : last.kind === "assign" ? last.role : last.agent) : "";
+    crew.textContent = ROLE_LINES[name] || "";
+  }
+  const why = document.getElementById("why");
+  const whyBody = document.getElementById("why-text");
+  if (why && whyBody) {
+    const text = refusalText(shown, state.mission);
+    why.hidden = !text;
+    whyBody.textContent = text;
+  }
   if (last) {
     focusAgent(last);
     const dock = document.getElementById("dock");
@@ -520,6 +660,24 @@ async function loadIndex() {
         index.push({ file: option.value });
       }
       select.append(v1Group, v2Group);
+    }
+  } catch (error) {
+    setNotice("");
+  }
+  try {
+    const v3Response = await fetch("traces/v3/index.json");
+    if (v3Response.ok) {
+      const v3Index = await v3Response.json();
+      const v3Group = document.createElement("optgroup");
+      v3Group.label = "Round table";
+      for (const item of v3Index) {
+        const option = document.createElement("option");
+        option.value = `v3/${item.file}`;
+        option.textContent = `${item.task_id} · ${item.outcome || item.status}`;
+        v3Group.append(option);
+        index.push({ file: option.value });
+      }
+      select.append(v3Group);
     }
   } catch (error) {
     setNotice("");
