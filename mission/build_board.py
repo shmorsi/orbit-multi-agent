@@ -11,6 +11,8 @@ import random
 import sys
 from pathlib import Path
 
+from orbit_agents.eval.metrics import measurements_match
+
 ROOT = Path(__file__).resolve().parents[1]
 RESULT = ROOT / "results" / "v2_qwen1.5b"
 OUT = ROOT / "mission" / "board.js"
@@ -134,15 +136,33 @@ def render(payload: dict) -> str:
     return "window.ORBIT_BOARD = " + json.dumps(payload, indent=2) + ";\n"
 
 
+def _committed_matches(payload: dict, text: str) -> bool:
+    if not OUT.is_file():
+        return False
+    current = OUT.read_text(encoding="utf-8")
+    if current == text:
+        return True
+    prefix = "window.ORBIT_BOARD = "
+    suffix = ";\n"
+    if not current.startswith(prefix) or not current.endswith(suffix):
+        return False
+    try:
+        committed = json.loads(current[len(prefix) : -len(suffix)])
+    except json.JSONDecodeError:
+        return False
+    return measurements_match(committed, payload)
+
+
 def main(argv: list[str] | None = None) -> None:
     args = argv if argv is not None else sys.argv[1:]
     payload = build_board()
     text = render(payload)
-    if "--check" in args:
-        current = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
-        if current != text:
-            raise SystemExit("mission/board.js is stale; run python mission/build_board.py")
+    if _committed_matches(payload, text):
+        if "--check" not in args:
+            print(json.dumps({"out": str(OUT), "unchanged": True}))
         return
+    if "--check" in args:
+        raise SystemExit("mission/board.js is stale; run python mission/build_board.py")
     OUT.write_text(text, encoding="utf-8")
     print(json.dumps({"out": str(OUT), "runs": [run["id"] for run in payload["runs"]]}))
 

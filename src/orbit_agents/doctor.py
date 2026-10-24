@@ -15,7 +15,7 @@ from orbit_agents.tasks import task_by_id
 
 
 def environment() -> dict:
-    """Python, platform, and the compute device. A missing torch module is CPU."""
+    """Python, platform, and torch device, without loading a model."""
     device = "cpu"
     torch_version = None
     try:
@@ -38,7 +38,7 @@ def environment() -> dict:
 
 
 def scripted_task() -> dict:
-    """Time one scripted task. This is a harness check, not a model score."""
+    """Time one scripted harness task and return the doctor record."""
     task = task_by_id("dev-001")
     if task is None:
         raise SystemExit("eval/dev.jsonl is missing dev-001")
@@ -55,7 +55,7 @@ def scripted_task() -> dict:
 
 
 def live_task(model: str) -> dict:
-    """Time one real model task. The caller asked for this with --live."""
+    """Time one real model task and return the doctor record."""
     from orbit_agents.backends import TransformersBackend
 
     task = task_by_id("dev-001")
@@ -73,7 +73,7 @@ def live_task(model: str) -> dict:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Print the environment report and exit non-zero when the scripted check fails."""
+    """Print the environment and one scripted task. --live adds a model call."""
     parser = argparse.ArgumentParser(description="Check Python, the compute device, and one tiny Orbit task")
     parser.add_argument("--live", action="store_true", help="Download the small model and run one real task")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")

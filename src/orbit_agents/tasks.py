@@ -12,7 +12,7 @@ TEST_PATH = ROOT / "eval" / "test.jsonl"
 
 
 def read_jsonl(path: Path) -> list[dict]:
-    """Read a JSONL task file. Blank lines are skipped."""
+    """Parse a JSONL file into dict rows."""
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
@@ -21,12 +21,12 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def all_tasks() -> list[dict]:
-    """Dev tasks, then the frozen test. Live questions are not in this list."""
+    """Dev tasks followed by test tasks."""
     return read_jsonl(DEV_PATH) + read_jsonl(TEST_PATH)
 
 
 def task_by_id(task_id: str) -> dict | None:
-    """Return the bundled task with this id, or None when the id is not frozen."""
+    """Return the task with this id, or None."""
     for task in all_tasks():
         if task["id"] == task_id:
             return task
@@ -34,7 +34,7 @@ def task_by_id(task_id: str) -> dict | None:
 
 
 def ad_hoc_task(question: str) -> dict:
-    """A live question with no gold. The scripted harness refuses to run it."""
+    """A live question with no gold and no oracle. It cannot be scored."""
     return {
         "id": "live",
         "split": "live",

@@ -6,10 +6,11 @@ only for files under results/v3_qwen1.5b/ that are measured model evals; a
 missing or pending file renders as "not scored". Paired intervals appear only
 when that directory's comparison.json is measured.
 
-API-policy rows (results/v3_api/<model>/team_v1.json and team_v2.json, written
-once each by `python -m orbit_agents.eval.score_team`) appear only for measured
-files. With none measured, the block is unchanged and the "v2 team (6 roles)"
-row does not exist.
+API-policy rows (results/v3_api/<model>/team_v1.json, team_v2.json, and
+team_v3.json, written once each by `python -m orbit_agents.eval.score_team`)
+appear only for measured files. With none measured, the "v2 team (6 roles)"
+row does not exist. The round-table team stays "not scored" until team_v3.json
+is a measured model eval.
 
     python -m orbit_agents.eval.readme          # rewrite the block
     python -m orbit_agents.eval.readme --check  # fail if the block is stale
@@ -20,7 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from orbit_agents.paths import ROOT
@@ -43,6 +44,7 @@ V3_PAIRS = (
 PENDING_API = (
     ("team_v1", "Claude policy, three-role team, harness v3", "results/v3_api/<model>/team_v1.json"),
     ("team_v2", "Claude policy, six-role team, harness v3", "results/v3_api/<model>/team_v2.json"),
+    ("team_v3", "Claude policy, round table, harness v3", "results/v3_api/<model>/team_v3.json"),
 )
 
 
@@ -124,18 +126,15 @@ def _v2(root: Path, distill_v3: bool) -> list[str]:
             "The adapter's two answerable successes sit next to a missed trap: correct refusals went from "
             f"{runs['team_base']['n_correct_refusals']} to {runs['team_lora']['n_correct_refusals']}. The paired "
             f"bootstrap for task success, adapter minus team base, is {_interval(success)}. {_zero(success)} "
-            f"The same pair's schema-valid interval is {_interval(schema)}. {_zero(schema)} "
-            "Schema-valid rate moved. Task success did not, on this 12-task set.",
+            f"The adapter is not separated from the base team on task success. The same pair's schema-valid interval "
+            f"is {_interval(schema)}. {_zero(schema)} Schema-valid rate moved. Task success did not, on this "
+            f"{runs['team_base']['n_tasks']}-task set.",
+            "",
+            "![Logged training loss for the measured Qwen2.5-1.5B QLoRA run. The curve is the committed file.]"
+            "(results/v2_qwen1.5b/loss_curve.png)",
             "",
         ]
     )
-    curve = folder / "loss_curve.png"
-    if curve.is_file():
-        lines.append(
-            "![Logged training loss for the measured Qwen2.5-1.5B QLoRA run. The curve is the committed file.]"
-            "(results/v2_qwen1.5b/loss_curve.png)"
-        )
-        lines.append("")
     lines.append(_v1(root))
     lines.append("")
     tail = (
@@ -159,9 +158,9 @@ def _v1(root: Path) -> str:
     return (
         f"The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were {successes}, then "
         f"{runs[2]['n_success']} of {runs[2]['n_tasks']}, with schema-valid rates {schema}, and "
-        f"{display_number(runs[2]['schema_valid_rate'])}. Logged loss went from {display_number(loss['first_logged_loss'])} "
-        f"to {display_number(loss['last_logged_loss'])}. Its task-success interval also failed to clear zero. "
-        "Fine-tuning taught the format."
+        f"{display_number(runs[2]['schema_valid_rate'])}. Logged loss went from "
+        f"{display_number(loss['first_logged_loss'])} to {display_number(loss['last_logged_loss'])}. "
+        "Its task-success interval also failed to clear zero. Fine-tuning taught the format."
     )
 
 
@@ -209,7 +208,21 @@ def _v3(root: Path) -> list[str]:
     return lines
 
 
-API_TEAMS = (("team_v1", "v1 team (3 roles)"), ("team_v2", "v2 team (6 roles)"))
+API_TEAMS = (
+    ("team_v1", "v1 team (3 roles)"),
+    ("team_v2", "v2 team (6 roles)"),
+    ("team_v3", "Round-table team"),
+)
+
+
+def _round_table(root: Path) -> list[str]:
+    """One sentence when no measured round-table file exists. No figure is invented."""
+    folder = root / "results" / "v3_api"
+    if folder.is_dir():
+        for model_dir in folder.iterdir():
+            if model_dir.is_dir() and _measured(_read(model_dir / "team_v3.json")):
+                return []
+    return ["", "The round-table team is not scored."]
 
 
 def _api(root: Path) -> list[str]:
@@ -249,8 +262,8 @@ def _api(root: Path) -> list[str]:
             success = pair["task_success_rate"]
             schema = pair["schema_valid_rate"]
             lines.append(
-                f"The paired bootstrap for task success, v2 team minus v1 team, is {_interval(success)}. {_zero(success)} "
-                f"Its schema-valid interval is {_interval(schema)}."
+                f"The paired bootstrap for task success, v2 team minus v1 team, is {_interval(success)}. "
+                f"{_zero(success)} Its schema-valid interval is {_interval(schema)}."
             )
     return lines
 
@@ -282,7 +295,11 @@ def _pending(root: Path) -> list[str]:
         return ["", "No pending model slot. Every configured score file is measured."]
     lines = [
         "",
-        "Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, and the QLoRA distill run on a T4, stay here until a measured file exists. The v3 rescores of the archived runs stay here for the same reason.",
+        (
+            "Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, the round table, and the "
+            "QLoRA distill run on a T4, stay here until a measured file exists. The v3 rescores of the archived runs "
+            "stay here for the same reason."
+        ),
         "",
         "| Slot | File | Status |",
         "| --- | --- | --- |",
@@ -292,15 +309,19 @@ def _pending(root: Path) -> list[str]:
 
 
 def render(root: Path = ROOT) -> str:
-    """The results block, including pending slots for files that are not measured."""
+    """Render the Key results block from the committed result files."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
     lines = [
         START,
-        "Rates, losses, and intervals below are the committed values, shown to three decimal places. The JSON files hold the full values.",
+        (
+            "Rates, losses, and intervals below are the committed values, shown to three decimal places. "
+            "The JSON files hold the full values."
+        ),
         "",
         *_v2(root, distill),
         "",
         *_v3(root),
+        *_round_table(root),
         *_api(root),
         *_pending(root),
         END,
@@ -309,7 +330,7 @@ def render(root: Path = ROOT) -> str:
 
 
 def updated_readme(root: Path = ROOT) -> str:
-    """README text with the results block replaced. The rest of the page is left as written."""
+    """Return README.md with the Key results block replaced by render()."""
     text = (root / "README.md").read_text(encoding="utf-8")
     if not BLOCK_RE.search(text):
         raise SystemExit("README.md has no RESULTS_START/RESULTS_END block")
@@ -318,7 +339,7 @@ def updated_readme(root: Path = ROOT) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Rewrite the results block, or fail when --check finds it stale."""
+    """Rewrite or check the Key results block."""
     parser = argparse.ArgumentParser(description="Write the README results block from results/")
     parser.add_argument("--check", action="store_true", help="Fail if README.md does not match the results files")
     parser.add_argument("--root", type=Path, default=ROOT)

@@ -16,13 +16,17 @@ def _claim_key(claim: dict) -> tuple:
 
 
 def score_task(task: dict, result: RunResult) -> dict:
-    """Score one run against gold that was computed from the tools."""
-    valid = int(getattr(result, "schema_valid"))
-    invalid = int(getattr(result, "schema_invalid"))
+    """Score one run against the task gold. A refusal task fails if the answer contains a digit."""
+    valid = int(result.schema_valid)
+    invalid = int(result.schema_invalid)
     total = valid + invalid
     schema_rate = (valid / total) if total else None
     if task["expect_refusal"]:
-        success = result.status == "refuse" and not result.claims and DIGIT_RE.search(result.answer) is None
+        success = (
+            result.status == "refuse"
+            and not result.claims
+            and DIGIT_RE.search(result.answer) is None
+        )
     else:
         gold = [_claim_key(claim) for claim in task["gold_claims"]]
         got = [_claim_key(claim) for claim in result.claims]

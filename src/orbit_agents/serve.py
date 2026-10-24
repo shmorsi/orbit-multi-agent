@@ -7,7 +7,6 @@ import queue
 import threading
 from collections.abc import Iterator
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
 from urllib.parse import urlparse
 
 from orbit_agents.engine import run_team
@@ -20,7 +19,7 @@ _LOCK = threading.Lock()
 
 
 def resolve_task(payload: dict) -> tuple[dict | None, str | None]:
-    """Return a task, or an error string. The scripted harness only accepts a bundled id."""
+    """Turn a request into a bundled or ad-hoc task, or an error string."""
     backend = payload.get("backend", "scripted")
     if backend not in {"scripted", "transformers", "ollama", "llamacpp"}:
         return None, "unknown backend"
@@ -38,8 +37,8 @@ def resolve_task(payload: dict) -> tuple[dict | None, str | None]:
     return ad_hoc_task(question), None
 
 
-def make_backend(name: str, task: dict, model: str, adapter: str | None) -> Any:
-    """Build the backend named in a live-run request."""
+def make_backend(name: str, task: dict, model: str, adapter: str | None):
+    """Build the backend named in a live Mission Control request."""
     if name == "scripted":
         from orbit_agents.scripted import ScriptedBackend
 
@@ -58,7 +57,7 @@ def make_backend(name: str, task: dict, model: str, adapter: str | None) -> Any:
 
 
 def stream_events(payload: dict) -> Iterator[str]:
-    """Yield JSONL events from one real run. Errors are events, not invented traces."""
+    """Yield JSONL events from one live team run."""
     task, error = resolve_task(payload)
     if error:
         yield json.dumps({"kind": "error", "error": error}) + "\n"
@@ -103,11 +102,12 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
-    def log_message(self, *_args: object) -> None:
-        """Quiet the default access log. The trace is the record."""
+    def log_message(self, fmt: str, *args) -> None:
+        """Quiet the default access log."""
         return
 
     def do_GET(self) -> None:
+        """Serve the Mission Control files."""
         path = urlparse(self.path).path
         if path.startswith("/.git") or "/.git/" in path or ".." in path:
             self.send_error(404)
@@ -117,6 +117,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        """Start one live run and stream its events."""
         if urlparse(self.path).path != "/api/run":
             self.send_error(404)
             return
@@ -136,19 +137,19 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def bind(port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
-    """Bind the mission-control server. The caller prints the URL."""
+    """Bind the mission server on localhost."""
     return ThreadingHTTPServer(("127.0.0.1", port), Handler)
 
 
 def serve(port: int = DEFAULT_PORT) -> None:
-    """Serve mission/ and the live run endpoint until interrupted."""
+    """Serve Mission Control until the process stops."""
     server = bind(port)
     print(f"Orbit: Multi-Agent Mission Control at http://127.0.0.1:{server.server_address[1]}/mission/")
     server.serve_forever()
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Start Mission Control. The default port is 8741."""
+    """Parse the port and serve Mission Control."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Serve mission control and live runs")

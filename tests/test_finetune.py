@@ -1,12 +1,12 @@
+import ast
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-import ast
-
+import pytest
 from leakage import BUILT_FROM, check, overlap_error
-from train import map_training_kwargs
+from train import guard_seq_length, map_training_kwargs, mask_assistant_tokens, seq_length_error
 
 
 def test_leakage_passes():
@@ -93,6 +93,83 @@ def test_warmup_ratio_maps_onto_the_transformers_5_signature():
     assert "eval_strategy" not in mapped
 
 
+class _WordTokenizer:
+    """One token per whitespace-separated word, with character offsets."""
+
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+        return "".join(
+            f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>\n" for message in messages
+        )
+
+    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False, **kwargs):
+        ids = []
+        offsets = []
+        index = 0
+        while index < len(text):
+            if text[index].isspace():
+                index += 1
+                continue
+            end = index
+            while end < len(text) and not text[end].isspace():
+                end += 1
+            ids.append(text[index:end])
+            offsets.append((index, end))
+            index = end
+        encoded = {"input_ids": ids, "attention_mask": [1] * len(ids)}
+        if return_offsets_mapping:
+            encoded["offset_mapping"] = offsets
+        return encoded
+
+
+def _dialog(system: str, user: str, assistant: str) -> list[dict]:
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+        {"role": "assistant", "content": assistant},
+    ]
+
+
+def test_seq_length_error_names_the_dialogs_that_would_lose_the_assistant_turn():
+    # Distill rows measure about 951 median and about 1,400 max. 768 cuts them.
+    message = seq_length_error([700, 951, 1400], 768)
+    assert message is not None
+    assert "2 of 3" in message
+    assert "max_seq_length 768" in message
+    assert "longest 1400" in message
+    assert "assistant mask is empty" in message
+    assert "at least 1400" in message
+    assert seq_length_error([700, 951, 1400], 1536) is None
+    assert seq_length_error([], 768) is None
+
+
+def test_distill_config_fits_the_measured_dialogs():
+    config = json.loads(Path("finetune/configs/qlora_distill.json").read_text(encoding="utf-8"))
+    assert config["max_seq_length"] >= 1536
+    assert seq_length_error([951, 1400], config["max_seq_length"]) is None
+
+
+def test_guard_seq_length_rejects_a_cap_shorter_than_the_dialogs():
+    tokenizer = _WordTokenizer()
+    system = " ".join(["rule"] * 30)
+    rows = [{"messages": _dialog(system, "count the jobs", "{\"action\": \"final\"}")}]
+    with pytest.raises(SystemExit, match="max_seq_length 8") as caught:
+        guard_seq_length(tokenizer, rows, 8)
+    assert "assistant mask is empty" in str(caught.value)
+    guard_seq_length(tokenizer, rows, 1536)
+
+
+def test_mask_assistant_tokens_refuses_to_truncate_the_assistant_turn():
+    tokenizer = _WordTokenizer()
+    messages = _dialog(" ".join(["rule"] * 20), "count the jobs", "job_count equals 5.")
+    with pytest.raises(RuntimeError, match="assistant mask is empty") as caught:
+        mask_assistant_tokens(tokenizer, messages, 8)
+    assert "max_seq_length is 8" in str(caught.value)
+    masked = mask_assistant_tokens(tokenizer, messages, 1536)
+    assert any(label != -100 for label in masked["labels"])
+    assert masked["labels"].count(-100) < len(masked["labels"])
+    assert "job_count" in masked["input_ids"]
+
+
 def test_notebook_trains_the_medium_config_once():
     notebook = json.loads(Path("finetune/colab_train.ipynb").read_text(encoding="utf-8"))
     sources = []
@@ -123,6 +200,14 @@ def test_notebook_trains_the_medium_config_once():
     assert "--split tune" in blob
     assert "import orbit_agents, os" in blob
     assert "qlora_small.json" not in blob
+    assert "colab-badge.svg" in blob
+    assert "results/v3_qwen1.5b/single_base.json" in blob
+    assert "results/v3_qwen1.5b/team_base.json" in blob
+    assert "results/v3_qwen1.5b/team_lora.json" in blob
+    assert "results/v3_qwen1.5b/team_distill.json" in blob
+    assert "'--out', 'results/single_base.json'" not in blob
+    assert "already measured" in blob
+    assert "orbit_agents.eval.readme" in blob
 
 
 def test_distill_notebook_runs_the_existing_path_once():
@@ -151,3 +236,5 @@ def test_distill_notebook_runs_the_existing_path_once():
     assert "already measured" in blob
     assert "Do not score the frozen test in a loop" in blob
     assert "print(_key" not in blob and "sk-ant" not in blob
+    assert "colab-badge.svg" in blob
+    assert "Commit only these paths" in blob

@@ -17,7 +17,7 @@ TOOL_ROLE = {tool: role for role, tools in ROLE_TOOLS.items() for tool in tools}
 
 
 def commander_steps(task: dict) -> list[dict]:
-    """Assign each oracle call to the specialist whose tool list contains it."""
+    """Assign each plan step to the specialist whose tools include the oracle call."""
     steps = []
     for plan_step, call in zip(task["plan"], task["oracle_calls"], strict=True):
         steps.append({"goal": plan_step["goal"], "role": TOOL_ROLE[call["tool"]], "tool": call["tool"]})
@@ -39,12 +39,15 @@ class ScriptedPolicyV2(LLMClient):
         return json.dumps(payload, ensure_ascii=True)
 
     def commander(self) -> dict:
+        """The oracle plan, with a role on each step."""
         return {"steps": commander_steps(self.task)}
 
     def critic(self) -> dict:
+        """Accept. The claims are the oracle claims."""
         return {"verdict": "accept", "reason": "The claims match the cited tool results."}
 
     def final(self) -> dict:
+        """The oracle final answer."""
         return {
             "action": "final",
             "status": self.task["status"],
@@ -53,6 +56,7 @@ class ScriptedPolicyV2(LLMClient):
         }
 
     def complete_text(self, messages: list[dict], schema: dict, *, role: str) -> str:
+        """Oracle reply for this seat. Tool calls are consumed in order."""
         del messages
         if role == "commander":
             return self._dump(self.commander())
@@ -75,6 +79,7 @@ class ReviseOnceV2(ScriptedPolicyV2):
         self.verdicts = 0
 
     def final(self) -> dict:
+        """First draft uses a wrong value. Later drafts are the oracle final."""
         self.drafts += 1
         if self.drafts > 1:
             return super().final()
@@ -87,6 +92,7 @@ class ReviseOnceV2(ScriptedPolicyV2):
         return {"action": "final", "status": "answer", "answer": answer, "claims": claims}
 
     def critic(self) -> dict:
+        """Revise once, then accept."""
         self.verdicts += 1
         if self.verdicts == 1:
             return {"verdict": "revise", "reason": "The cited tool result does not contain that figure."}
@@ -105,9 +111,11 @@ class AuditorCatch(ScriptedPolicyV2):
         self.extra_number = int(extra_number)
 
     def final(self) -> dict:
+        """Oracle claims, plus a figure in the answer that no tool produced."""
         honest = super().final()
         honest["answer"] = f"{honest['answer']} That is about {self.extra_number} percent of all jobs."
         return honest
 
     def critic(self) -> dict:
+        """Accept, so only the auditor can catch the extra figure."""
         return {"verdict": "accept", "reason": "The cited claims match the tool results."}

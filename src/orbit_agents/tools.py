@@ -182,7 +182,7 @@ def _eval_calc(node: ast.AST) -> int:
 
 
 def run_calculator(expression: str) -> dict:
-    """Evaluate a small integer expression. The only division is floor division. A single slash is rejected."""
+    """Evaluate one integer expression. True division is rejected."""
     if not expression or any(ch not in "0123456789+-*/() " for ch in expression):
         return {"ok": False, "error": "expression may use only integers, spaces, and + - * // ()"}
     try:
@@ -200,7 +200,7 @@ def run_calculator(expression: str) -> dict:
 
 
 def run_read_file(path: str) -> dict:
-    """Read one bundled file. Paths outside the corpus are refused."""
+    """Read one corpus file by relative path."""
     try:
         body = read_text(path)
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
@@ -219,7 +219,7 @@ def _workspace_path(workspace: Path, relative: str) -> Path:
 
 
 def run_write_file(workspace: Path, path: str, content: str) -> dict:
-    """Write one file inside this run's workspace. The corpus is not writable."""
+    """Write one file under this run's workspace."""
     try:
         target = _workspace_path(workspace, path)
     except ValueError as exc:
@@ -247,7 +247,10 @@ def _search_cards() -> list[tuple[str, str, int]]:
                     cards.append((relative, text, 0))
     for name, relative in sorted(TABLES.items()):
         header = (CORPUS / relative).read_text(encoding="utf-8").splitlines()[0].strip()
-        text = f"Table {name} is file {relative} with columns {header}. Read it in python with table('{name}')."
+        text = (
+            f"Table {name} is file {relative} with columns {header}. "
+            f"Read it in python with table('{name}')."
+        )
         cards.append((relative, text, 1))
     logs = CORPUS / "logs"
     if logs.is_dir():
@@ -284,7 +287,7 @@ def run_web_search(query: str) -> dict:
 
 
 def call_tool(name: str, arguments: dict, workspace: Path) -> dict:
-    """Run one sandboxed tool. Unknown names and bad arguments come back as ok: false."""
+    """Dispatch one sandboxed tool call. Unknown tools return ok false."""
     try:
         validate(TOOL_SCHEMAS[name], arguments)
     except Exception as exc:  # schema errors are tool failures, not crashes

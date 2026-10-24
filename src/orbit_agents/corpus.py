@@ -13,7 +13,7 @@ TABLES = {"jobs": "jobs.csv", "shifts": "shifts.csv"}
 
 
 def file_sha256(path: Path) -> str:
-    """SHA-256 of a corpus file. The manifest stores this digest."""
+    """SHA-256 of a file's bytes."""
     digest = hashlib.sha256()
     digest.update(path.read_bytes())
     return digest.hexdigest()
@@ -40,7 +40,7 @@ def corpus_guide() -> str:
 
 
 def write_manifest() -> dict:
-    """Rewrite data/manifest.json from the files on disk."""
+    """Rewrite data/manifest.json from the current corpus bytes."""
     files = {}
     for path in corpus_files():
         relative = path.relative_to(CORPUS).as_posix()
@@ -51,14 +51,14 @@ def write_manifest() -> dict:
 
 
 def load_manifest() -> dict:
-    """Read data/manifest.json. Missing means the corpus was never hashed."""
+    """Read the corpus manifest, or exit if it has not been written."""
     if not MANIFEST.is_file():
         raise FileNotFoundError(f"missing {MANIFEST}; run python -m orbit_agents.eval.build_tasks")
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
 
 def verify() -> dict:
-    """Raise when the corpus files do not match the manifest."""
+    """Raise if the corpus file set or any hash disagrees with the manifest."""
     manifest = load_manifest()
     expected = manifest["files"]
     found = {path.relative_to(CORPUS).as_posix(): path for path in corpus_files()}
@@ -73,7 +73,7 @@ def verify() -> dict:
 
 
 def resolve_corpus(relative: str) -> Path:
-    """Resolve a relative corpus path and refuse anything that leaves the bundle."""
+    """Resolve one relative corpus path after the manifest check."""
     verify()
     if not relative or relative.startswith(("/", "\\")) or ".." in Path(relative).parts:
         raise ValueError("path must stay inside the bundled corpus")
@@ -86,7 +86,7 @@ def resolve_corpus(relative: str) -> Path:
 
 
 def load_table(name: str) -> list[dict[str, str]]:
-    """Load jobs or shifts. The name has to be one of the bundled tables."""
+    """Load a named CSV table from the corpus."""
     if name not in TABLES:
         raise ValueError(f"unknown table {name}")
     path = resolve_corpus(TABLES[name])
@@ -95,5 +95,5 @@ def load_table(name: str) -> list[dict[str, str]]:
 
 
 def read_text(relative: str) -> str:
-    """Read one bundled text file after the manifest check."""
+    """Read one bundled text file."""
     return resolve_corpus(relative).read_text(encoding="utf-8")
