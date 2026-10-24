@@ -405,9 +405,10 @@ def test_results_row_appears_only_when_measured_and_scoring_runs_once(tmp_path):
         main(["--team", "v2", "--provider", "ollama", "--model", "fake-model", "--root", str(root)], policy=_OraclePolicy())
 
 
-def test_readme_names_v2_as_not_scored():
+def test_readme_points_at_the_measured_v2_score():
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "## v2: six roles" in readme
     section = readme.split("## v2: six roles", 1)[1].split("\n## ", 1)[0]
-    assert "not been scored" in section
+    assert "not been scored" not in section
     assert "make score-v2" in section
+    assert "results/v3_api/" in section

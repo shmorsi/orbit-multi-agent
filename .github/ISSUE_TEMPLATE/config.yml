@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Mission Control
+    url: https://shmorsi.github.io/orbit/
+    about: The live replay of a saved engine trace.

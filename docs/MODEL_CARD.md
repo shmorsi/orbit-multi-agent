@@ -12,7 +12,7 @@ A distillation path asks a teacher (Claude by default, Gemini as an option) to p
 
 ## What was not trained
 
-The six-role team and the round table are API policies plus a code gate. They have not been scored. `make score-v2` and `make score-v3` are the commands that would score them once, with `ANTHROPIC_API_KEY` or `ORBIT_ANTHROPIC_API_KEY`. Until `results/v3_api/<model>/team_v3.json` is a measured model eval, the README says the round-table team is not scored.
+The three-role team and the six-role team have each been scored once as an API policy. The files are under `results/v3_api/`. The round table has not been scored. `make score-v3` is the command that would score it once, with `ANTHROPIC_API_KEY` or `ORBIT_ANTHROPIC_API_KEY`. Until `results/v3_api/<model>/team_v3.json` is a measured model eval, the README says the round-table team is not scored.
 
 Harness v3 is a change to search, python, and the critic's JSON shape. It is not the round-table team. Those Qwen scores are not in yet. They would land in `results/v3_qwen1.5b/`.
 

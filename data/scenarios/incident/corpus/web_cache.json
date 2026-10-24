@@ -1,0 +1,9 @@
+{
+  "pages": [
+    {
+      "query": "checkout status",
+      "title": "Status",
+      "snippet": "Checkout is degraded. Payment-service is under investigation. No revenue figure is published."
+    }
+  ]
+}

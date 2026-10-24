@@ -35,6 +35,7 @@ from distill_teacher import (
     RequestBudget,
     TeacherBackend,
     build_parser,
+    default_transport,
     estimate_cost_usd,
     load_checkpoint,
     load_pool,
@@ -949,6 +950,51 @@ def test_anthropic_429_and_529_back_off_then_continue():
         assert calls["n"] == 2
         assert sleeps == [20]
         assert budget.used == 2
+
+
+def test_read_timeout_is_retried_as_504_and_counts_toward_the_cap(monkeypatch):
+    """A socket read timeout used to crash the scorer. It is now HTTP 504."""
+    seen = {}
+
+    def raise_urlerror(_request, timeout=0):
+        del timeout
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", raise_urlerror)
+    status, body = default_transport("https://api.anthropic.com/v1/messages", {}, {"model": "x"}, 30)
+    assert status == 504
+    assert "timeout" in body["error"]["message"]
+
+    calls = {"n": 0}
+
+    class _Body:
+        status = 200
+
+        def read(self):
+            return json.dumps(_anthropic_body("ok")).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    def urlopen(_request, timeout=0):
+        del timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("The read operation timed out")
+        return _Body()
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    budget, sleeps = _clocked_budget()
+    client = _anthropic_client(budget, default_transport)
+    assert client.generate([{"role": "user", "content": "Task: one"}]) == "ok"
+    assert calls["n"] == 2
+    assert sleeps == [20]
+    assert budget.used == 2
+    seen["counts"] = budget.status_count_map()
+    assert seen["counts"] == {"200": 1, "504": 1}
 
 
 def test_anthropic_client_error_is_not_retried():

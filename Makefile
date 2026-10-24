@@ -3,7 +3,7 @@ PROVIDER ?= anthropic
 MODEL ?= claude-haiku-5-5
 MAX_COST_USD ?= 5
 
-.PHONY: setup demo doctor doctor-live traces traces-v2 traces-v3 test check readme score-v1 score-v2 score-v3 score-dry-run finetune-data finetune-dry-run distill-dry-run
+.PHONY: setup demo doctor doctor-live traces traces-v2 traces-v3 traces-incident test check readme figures score-v1 score-v2 score-v3 score-dry-run finetune-data finetune-dry-run distill-dry-run
 
 setup:
 	$(PYTHON) -m pip install -e ".[dev]" -r requirements-infer.txt
@@ -25,6 +25,9 @@ traces-v2:
 
 traces-v3:
 	$(PYTHON) -m orbit_agents.trace --team v3
+
+traces-incident:
+	$(PYTHON) -m orbit_agents.trace --team incident
 
 # Score a team once on the frozen test with an API or local policy. Refuses an already measured config.
 score-dry-run:
@@ -63,6 +66,9 @@ check: test
 
 readme:
 	$(PYTHON) -m orbit_agents.eval.readme
+
+figures:
+	$(PYTHON) docs/build_figures.py --check
 
 finetune-data:
 	$(PYTHON) finetune/generate_data.py

@@ -9,7 +9,7 @@ authors = [{ name = "Sherif Morsi", email = "shmorsi@outlook.com" }]
 dependencies = ["jsonschema>=4.21"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff==0.17.2", "playwright==1.64.1"]
+dev = ["pytest>=8", "ruff==0.17.2", "playwright==1.64.1", "fonttools==4.67.0", "brotli==1.2.1"]
 infer = [
   "torch==2.11.0",
   "transformers==5.20.2",

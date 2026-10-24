@@ -1,109 +1,98 @@
 # Orbit
 
-A local language-agent team that calls tools under a schema and refuses any claim those tools cannot prove.
+An autonomous incident commander: a local crew that writes the checkout-outage report only when the logs, the metrics, and the runbook support every claim.
 
-[![check](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml)
-[![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue)](https://www.python.org/)
-[![Live replay](https://img.shields.io/badge/replay-live-blue)](https://shmorsi.github.io/orbit/)
+[![ci](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml)
+[![python](https://img.shields.io/badge/python-3.11%2B-black)](https://www.python.org/downloads/)
+[![license](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 
-**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [Why this matters](#why-this-matters) · [Key results](#key-results) · [Six roles](#v2-six-roles) · [Round table](#round-table) · [Quickstart](#quickstart) · [Integrity](#reproducibility-and-integrity)
+[Mission Control](https://shmorsi.github.io/orbit/) · [Portfolio](https://shmorsi.github.io/) · [Architecture](#architecture) · [Key results](#key-results) · [Six roles](#v2-six-roles) · [Round table](#round-table) · [Quickstart](#quickstart) · [Integrity](#reproducibility-and-integrity)
 
-![Mission Control replaying a saved engine trace](docs/mission-control.gif)
+<p align="center">
+  <img src="docs/incident-commander.gif" alt="Incident commander replay. A scripted harness on a fictional checkout outage. The commander assigns steps, the engineer counts log lines, and the code gate refuses an inventory root cause the files do not support.">
+</p>
 
-A refusal means the tools did not support the claim. The red team can propose a count that is not in the tool results. The code gate refuses that count, and it is not the team's answer. The auditor does the same to the draft: a claim or a number missing from the cited tool result is replaced with a refusal. A task is also refused when the corpus has no record that answers it.
+The clip is a scripted demo. The corpus is fictional. Every measured number on this page comes from the frozen makerspace test, not from this outage.
 
-| Seat | One line |
+<p align="center">
+  <img src="docs/hero.svg" alt="Orbit. Schema-valid rate 0.607 to 0.780 on the frozen test. Task success 2 of 12 to 3 of 12, interval includes zero. API task success 1 of 12 to 0 of 12, interval includes zero. API schema-valid interval below zero. The round table and the T4 distill run are pending.">
+</p>
+
+| | |
 | --- | --- |
-| Coordinator | Opens the table. No tools and no answer. |
-| Commander | Assigns each step to the seat that owns that tool. |
-| Researcher | Reads the corpus. Cannot run code or answer. |
-| Scout | Reads the corpus with the same read tools. |
-| Engineer | Runs code or writes a file. Cannot answer. |
-| Analyst | Drafts the only answer the auditor scores. |
-| Critic | Accepts the draft or sends it back. |
-| Red team | Proposes one claim the tools do not support. |
-| Verifier | The code gate re-checks that claim. The code verdict stands. |
-| Auditor | Refuses the draft when a claim or a number is unsupported. |
+| **What it is** | The featured replay is an incident commander on a fictional checkout outage: commander, engineer, critic, and a code gate. It is a scripted harness following the oracle, not a model score. The measured runs are three roles on the makerspace corpus. The planner writes at most four steps. The worker calls one sandboxed tool or states a final answer. The critic accepts the claim or sends it back. A grounding gate drops anything the tool results do not support. |
+| **Why it matters** | A tool-calling model can emit valid JSON and still invent the number. Orbit separates those two failures and scores them once on a frozen test. The page reports what landed, including the comparison that did not clear zero. |
+| **Key results** | QLoRA on Qwen2.5-1.5B moved the schema-valid rate from 0.607 to 0.780, shown to three decimal places. That paired interval is above zero. Task success went from 2 of 12 to 3 of 12, and that paired interval includes zero, so the adapter is not separated from the base team on task success. The Claude rows are in Key results. The round table and the T4 distill run are pending. |
+
+Fine-tuning taught the format. It did not separate the runs on task success. The files in `results/v2_qwen1.5b/` hold the full values. The diagram below is the measured three-role team. `docs/build_figures.py` draws the hero from those files.
 
 ```mermaid
-flowchart LR
-  task[Task] --> commander[Commander]
-  commander -->|assign| scout[Scout]
-  commander -->|assign| engineer[Engineer]
-  commander -->|assign| analyst[Analyst]
-  scout --> tools[Tools]
-  engineer --> tools
-  analyst --> tools
-  tools --> analyst
-  analyst -->|draft| critic[Critic]
-  critic -->|revise| analyst
-  critic -->|accept| auditor[Auditor]
-  auditor --> trace[JSONL trace]
-```
-
-Six seats share one gate. The commander assigns a step, specialists call tools, the critic can send a draft back, and the auditor refuses any claim the tool results do not support. The measured runs used the three-role team in [Architecture](#architecture). This six-role team has not been scored.
-
-## Why this matters
-
-Hiring teams want an agent that uses tools and stops when the evidence runs out. Orbit is a small, fully inspectable version of that problem. Every seat returns one JSON object. The tools are sandboxed and nothing in that path opens a socket. A critic can send a claim back. A gate keeps a claim only when the cited tool result contains it, a python call printed it, or it equals a count of matching lines in the cited text.
-
-The frozen test is hashed, tagged, and kept out of training. Each model is scored once, with a paired bootstrap, and a negative result stays on the page. The measured 1.5B QLoRA run learned the answer format. On the frozen 12-task test it did not produce a task-success gain this sample can support. The paired interval for task success includes zero. That is the result.
-
-## Key results
-
-This block is written by `python -m orbit_agents.eval.readme` from the files in `results/`. API scores and team distill are pending. A pending run is a row that says not scored, with no number filled in.
-
-<!-- RESULTS_START -->
-Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, 307 train dialogues and 71 tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went from 1.152004337310791 at step 10 to 0.05106291174888611 at step 150. Task success did not clear zero.
-
-| Run | Successes | Task-success rate | Schema-valid rate | Trap refusals |
-| --- | --- | --- | --- | --- |
-| Single base | 2 of 12 | 0.16666666666666666 | 0.75 | 2 of 2 |
-| Team base | 2 of 12 | 0.16666666666666666 | 0.6071428571428571 | 2 of 2 |
-| Team plus adapter | 3 of 12 | 0.25 | 0.7797619047619048 | 1 of 2 |
-| Team distill | not scored | | | |
-
-The adapter's two answerable successes sit next to a missed trap: correct refusals went from 2 to 1. The paired bootstrap for task success, adapter minus team base, is -0.16666666666666666 to 0.3333333333333333 (point 0.08333333333333333). That interval includes zero, so the task-success gain is not statistically significant. The same pair's schema-valid interval is 0.0013888888888889117 to 0.33888888888888885 (point 0.17261904761904764). Schema-valid rate moved. Task success did not, on this 12-task set.
-
-The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were 2 of 12, 2 of 12, then 1 of 12, with schema-valid rates 0.0, 0.07083333333333335, and 0.6131944444444445. Logged loss went from 1.3191939353942872 to 0.20024461746215821. Its task-success interval also failed to clear zero. Fine-tuning taught the format.
-
-The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config. It has not been scored.
-
-The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
-
-The round-table team is not scored.
-<!-- RESULTS_END -->
-
-![Mission Control replaying a saved trace, with the frozen-test flight data underneath](docs/mission-board.png)
-
-![Flight-data board for the frozen 1.5B runs: task success, schema-valid rate, the paired bootstrap, training loss, and trap outcomes, with team distill empty](docs/mission-flight-data.png)
-
-<video src="docs/mission-control.mp4" controls muted playsinline aria-label="Mission Control replaying a saved trace, stepping through planner, worker, tool, and critic"></video>
-
-![Mission Control at the moment the critic accepts a grounded claim about printer jobs](docs/mission-replay.png)
-
-## Architecture
-
-Orbit runs over a fictional makerspace corpus. The worker calls tools. The critic sends a bad claim back. A gate keeps a claim when the cited tool result contains it, when a successful python call printed the count, or when the count equals the number of lines in the cited text that contain a token from the question. Otherwise the gate refuses the claim. Mission Control replays the JSONL trace, including a task you start on your own machine.
-
-```mermaid
+%%{init: {"theme": "dark", "themeVariables": {"background": "#000000", "primaryColor": "#000000", "primaryTextColor": "#f5f5f7", "primaryBorderColor": "#8ec5ff", "lineColor": "#a8a8ad", "fontFamily": "Inter Tight, Helvetica, Arial, sans-serif"}}}%%
 flowchart LR
   task[Task] --> planner[Planner]
-  planner --> bus[Message bus]
-  bus --> worker[Worker]
-  worker --> tools[Tools]
+  planner --> worker[Worker]
+  worker --> tools[Sandbox]
   tools --> worker
   worker --> critic[Critic]
   critic -->|revise| worker
-  critic -->|accept| gate[Groundedness gate]
+  critic -->|accept| gate[Grounding gate]
   gate --> trace[JSONL trace]
-  trace --> viewer[Mission Control]
 ```
+
+## Quickstart
+
+Python 3.11 or newer. These commands install the harness, time one scripted task, and run the suite. They do not download a model and they do not score the frozen test.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+python -m orbit_agents.doctor
+python -m pytest
+```
+
+`python -m orbit_agents.doctor` prints JSON. `scripted.ok` is true and `scripted.kind` is `scripted_harness`. That is a harness check, not a model score. `pytest` includes the check that the results block matches the files.
+
+Mission Control on this machine:
+
+```bash
+python -m orbit_agents.serve
+```
+
+`make setup` also installs the demo stack, then `make test` runs the suite and `make demo` opens the same page. Open the localhost URL the server prints. Pick a bundled task id for the scripted harness. A free-form question needs a model backend. Platform notes are in [Run it locally](#run-it-locally). The development notes, including what not to edit, are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## Why this matters
+
+Checkout is failing. The commander assigns the steps. The engineer counts the log lines in code. A red team blames the inventory service. The code gate refuses that root cause because the cited tool result does not support it, and the auditor keeps only the claims the files actually contain. That is the incident commander. The files are a made-up night, and the replay follows the oracle. It shows the protocol. It is not a model score.
+
+Hiring teams want an agent that uses tools and stops when the evidence runs out. Orbit is a small, fully inspectable version of that problem. Every seat returns one JSON object. The tools are sandboxed and nothing in that path opens a socket. A critic can send a claim back. A gate keeps a claim only when the cited tool result contains it, a python call printed it, or it equals a count of matching lines in the cited text.
+
+The frozen test is hashed, tagged, and kept out of training. Each model is scored once, with a paired bootstrap, and a comparison that includes zero stays on the page. The measured 1.5B QLoRA run learned the answer format. On the frozen 12-task test the paired interval for task success includes zero. That is the result.
+
+## Architecture
+
+<p align="center">
+  <img src="docs/architecture.svg" alt="Architecture. Task, planner, worker, critic, grounding gate, JSONL trace. Sandboxed tools under the worker. The critic can revise. The gate is the only accent.">
+</p>
+
+The measured numbers on this page are the three-role team, harness v2, archived in `results/v2_qwen1.5b/`. The picture is drawn by `docs/build_figures.py` from those files and from the constants in the engine. It is not a stock image.
+
+**Planner.** One JSON object. At most four steps, or an empty plan when the corpus cannot answer.
+
+**Worker.** One JSON object: a tool call, or a final answer with claims. Each claim cites a tool result.
+
+**Critic.** One JSON object. It accepts a grounded claim or sends the draft back, at most 2 times.
+
+**Grounding gate.** Code, not another model turn. A claim stays when the cited tool result contains it, when a python call printed the count, or when the count equals the number of matching lines in the cited text. Otherwise the gate refuses the claim.
+
+**Sandbox.** The worker may call `calculator`, `read_file`, `write_file`, `python`, `retrieve`, or `web_search`. `web_search` reads a bundled cache. Nothing in the tool path opens a socket. The Python tool runs in a child process and is killed after one second.
+
+The team stops after 8 turns. A broken schema gets 2 tries on that turn. Mission Control replays the JSONL trace, including a task you start on your own machine.
 
 The teacher pass sits beside that loop. It never sees the frozen test.
 
 ```mermaid
+%%{init: {"theme": "dark", "themeVariables": {"background": "#000000", "primaryColor": "#000000", "primaryTextColor": "#f5f5f7", "primaryBorderColor": "#a8a8ad", "lineColor": "#a8a8ad", "fontFamily": "Inter Tight, Helvetica, Arial, sans-serif"}}}%%
 flowchart LR
   pool[Train and tune tasks] --> teacher[Claude or Gemini teacher]
   teacher --> sandbox[Local tool sandbox]
@@ -116,14 +105,64 @@ flowchart LR
   student --> score[One frozen score]
 ```
 
-The tools are a sandboxed Python cell that reads a bundled table or file by path, a calculator, corpus file read, a per-run file write, keyword retrieval over the bundled notes, tables, and logs, and an offline web cache. Nothing in the tool path opens a socket. The teacher script is the only piece that calls a model API (Claude by default, or Gemini), and only with a train or tune prompt.
+## Key results
 
-Flight rules, from the code the replay reads:
+This block is written by `python -m orbit_agents.eval.readme` from the files in `results/`. Team distill and the round table stay pending. A pending run is a row that says not scored, with no number filled in.
 
-- The planner returns at most four steps, or an empty plan when the corpus cannot answer.
-- The worker emits one tool call or a final answer. A claim cites a tool result that contains it, a python call that printed the count, or text with that many matching lines.
-- The critic replies with one JSON object. It accepts a grounded claim, including a count printed by python and a count of matching lines in the cited text. Otherwise it revises, at most 2 times, and then the gate refuses unsupported claims.
-- The team stops after 8 turns. A broken schema gets 2 tries on that turn.
+<!-- RESULTS_START -->
+Rates, losses, and intervals below are the committed values, shown to three decimal places. The JSON files hold the full values.
+
+Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, 307 train dialogues and 71 tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went from 1.152 at step 10 to 0.051 at step 150. Task success did not clear zero.
+
+| Run | Successes | Task-success rate | Schema-valid rate | Trap refusals |
+| --- | --- | --- | --- | --- |
+| Single base | 2 of 12 | 0.167 | 0.750 | 2 of 2 |
+| Team base | 2 of 12 | 0.167 | 0.607 | 2 of 2 |
+| Team plus adapter | 3 of 12 | 0.250 | 0.780 | 1 of 2 |
+| Team distill | not scored | | | |
+
+The adapter's two answerable successes sit next to a missed trap: correct refusals went from 2 to 1. The paired bootstrap for task success, adapter minus team base, is -0.167 to 0.333 (point 0.083). That interval includes zero. The adapter is not separated from the base team on task success. The same pair's schema-valid interval is 0.001 to 0.339 (point 0.173). That interval is above zero. Schema-valid rate moved. Task success did not, on this 12-task set.
+
+![Logged training loss for the measured Qwen2.5-1.5B QLoRA run. The curve is the committed file.](results/v2_qwen1.5b/loss_curve.png)
+
+The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were 2 of 12, 2 of 12, then 1 of 12, with schema-valid rates 0.000, 0.071, and 0.613. Logged loss went from 1.319 to 0.200. Its task-success interval also failed to clear zero. Fine-tuning taught the format.
+
+The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config. It has not been scored.
+
+The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
+
+The round-table team is not scored.
+
+API policy `claude-haiku-5-5`, harness v3, frozen test `team-eval-v1`, each team scored once with the same model and role prompts only. Files: `results/v3_api/claude-haiku-5-5/`.
+
+| Run | Successes | Task-success rate | Schema-valid rate | Trap refusals |
+| --- | --- | --- | --- | --- |
+| v1 team (3 roles) | 1 of 12 | 0.083 | 0.862 | 1 of 2 |
+| v2 team (6 roles) | 0 of 12 | 0.000 | 0.559 | 0 of 2 |
+| Round-table team | not scored | | | |
+
+The paired bootstrap for task success, v2 team minus v1 team, is -0.250 to 0.000 (point -0.083). That interval includes zero. Its schema-valid interval is -0.425 to -0.174 (point -0.303). That interval is below zero.
+
+Pending slots. A row here is not a result. The round table and the QLoRA distill run on a T4 stay here until a measured file exists. The v3 rescores of the archived runs stay here for the same reason.
+
+| Slot | File | Status |
+| --- | --- | --- |
+| Single base, harness v3 | `results/v3_qwen1.5b/single_base.json` | pending |
+| Team base, harness v3 | `results/v3_qwen1.5b/team_base.json` | pending |
+| Team plus adapter, harness v3 | `results/v3_qwen1.5b/team_lora.json` | pending |
+| Team distill, QLoRA on a T4, harness v3 | `results/v3_qwen1.5b/team_distill.json` | pending |
+| Claude policy, round table, harness v3 | `results/v3_api/<model>/team_v3.json` | pending |
+<!-- RESULTS_END -->
+
+![Mission Control replaying a saved engine trace](docs/mission-control.gif)
+
+![Mission Control replaying a saved trace, with the frozen-test flight data underneath](docs/mission-board.png)
+
+![Flight-data board for the frozen 1.5B runs: task success, schema-valid rate, the paired bootstrap, training loss, and trap outcomes, with team distill empty](docs/mission-flight-data.png)
+
+<video src="docs/mission-control.mp4" controls muted playsinline aria-label="Mission Control replaying a saved trace, stepping through planner, worker, tool, and critic"></video>
+
+![Mission Control at the moment the critic accepts a grounded claim about printer jobs](docs/mission-replay.png)
 
 ## v2: six roles
 
@@ -176,7 +215,7 @@ make score-v1 MODEL=claude-haiku-5-5
 make score-v2 MODEL=claude-haiku-5-5
 ```
 
-Each target scores the frozen test once and writes `results/v3_api/<model>/team_v1.json` or `team_v2.json`. It refuses a config that is already measured. The request cap and the 5 USD cost stop are the distillation script's. When both files are measured, the paired bootstrap of v2 minus v1 is written next to them, and the README generator adds the rows below. The v2 team has not been scored yet.
+Each target scores the frozen test once and writes `results/v3_api/<model>/team_v1.json` or `team_v2.json`. It refuses a config that is already measured. The request cap and the 5 USD cost stop are the distillation script's. When both files are measured, the paired bootstrap of v2 minus v1 is written next to them, and the README generator adds the rows below. Those two files for this model are measured. The rows are in Key results. `make score-v2` refuses a second run.
 
 If `ORBIT_ANTHROPIC_API_KEY` and `ANTHROPIC_API_KEY` are both unset, `make score-v1` and `make score-v2` exit before any request and name `ORBIT_ANTHROPIC_API_KEY`. Nothing is read from a file. `make score-dry-run` does not read a key.
 
@@ -203,18 +242,6 @@ make score-v3 MODEL=claude-haiku-5-5
 
 `make score-v3` also accepts `ORBIT_ANTHROPIC_API_KEY`. It writes `results/v3_api/<model>/team_v3.json` and refuses a file that is already measured. The generator then fills the round-table row. Until that file is measured, the Key results block says the round-table team is not scored, with no number filled in. Harness v3, the tool and gate change described in that block, is a different thing from this team. The model card is [docs/MODEL_CARD.md](docs/MODEL_CARD.md). The eval write-up is [docs/EVAL.md](docs/EVAL.md).
 
-## Quickstart
-
-Three commands from a fresh clone. The first creates the environment and installs the package. The second runs the suite. The third opens Mission Control.
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate && make setup
-make test
-make demo
-```
-
-`make doctor` times the scripted harness on your machine. Platform notes are in [Run it locally](#run-it-locally). The development notes, including what not to edit, are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
-
 ## Reproducibility and integrity
 
 - The frozen test is `eval/test.jsonl`, tagged `team-eval-v1`. Its digest is stored in `eval/manifest.json`. `make score-dry-run` checks the file and the tag, reads no API key, and writes nothing.
@@ -223,25 +250,26 @@ make demo
 - A config is scored once. `eval.run` and `eval.compare` refuse archived files, harness checks, the pending placeholders, and a second score of a measured frozen-test file.
 - Files at the top of `results/` with status pending are not model scores. `results/harness_single.json` and `results/harness_team.json` replay the scripted harness. They are system checks.
 - The manifest also stores a prompt digest from the protocol freeze. Later harness work changed the role prompts. The scorer checks the frozen test and the tag. This page does not treat that prompt digest as a current hash of the prompts.
+- An earlier Claude score crashed on a socket read timeout, wrote no score file, and was rerun from scratch after the transport began returning that timeout as a retryable server error.
 - Cite the project with [CITATION.cff](CITATION.cff).
 
 ## What I'd do next
 
 Future work, not a claim about a result:
 
-- Score the three-role team, the six-role team, and the round table once on the same API model, with `make score-v1`, `make score-v2`, and `make score-v3`, and let the generator add only the rows it can read from measured files.
+- Score the round table once with `make score-v3` and let the generator add that row. The three-role and six-role API scores are already measured.
 - Run the distill notebook once on a Colab T4, score team distill under harness v3, and commit only `results/v3_qwen1.5b/*.json` and `README.md`.
 - Keep the archived v2 numbers in `results/v2_qwen1.5b/` and do not compare them with a v3 score.
 - Train more than one seed before talking about a distribution. This page has one training run per config.
 
-## Limits
+## Limitations
 
 - The frozen test is 12 tasks, 2 of them traps. One task moves a rate by a twelfth, so only large effects can clear zero.
 - Each model was trained once and scored once. There is no seed sweep.
-- The adapter that gained a success also missed a trap: correct refusals went from 2 to 1.
-- The harness changed in v3. The v2 numbers are archived and are not compared with v3 runs. No v3 model score is in yet.
+- The adapter that added a success also missed a trap: correct refusals went from 2 to 1.
+- The harness changed in v3. The archived Qwen numbers are not compared with a harness-v3 rescore of those runs. Those Qwen rescores are not in yet.
 - Team distill has not been scored. The notebook below is the path to that one score.
-- The v2 team (6 roles) has not been scored. Its traces in `mission/traces/v2/` come from the scripted harness, which follows each task's oracle; they show the protocol, not model skill.
+- The six-role API score is in Key results. The traces in `mission/traces/v2/` still come from the scripted harness, which follows each task's oracle; they show the protocol, separate from that score.
 - The round-table team has not been scored. Its traces in `mission/traces/v3/` are the same kind of harness replay.
 - The free-T4 wall clock for training plus scoring has not been measured.
 

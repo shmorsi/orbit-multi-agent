@@ -1,0 +1,41 @@
+{
+  "corpus": "corpus",
+  "files": {
+    "docs/runbook.md": {
+      "sha256": "a5dc23fb556d60c39a2e40dbf7420d0ae4627969fe5232f5cc33e275f693df0d",
+      "bytes": 348
+    },
+    "docs/status.md": {
+      "sha256": "f6108987b168852ef429ee5e4fac42f028725bdcfa6d6d637e7fdb7a3afa05c4",
+      "bytes": 204
+    },
+    "logs/checkout.log": {
+      "sha256": "c937850dbcc10e1229d5ef162a82aacaabe5b0aed810995b56161e7ff24458b7",
+      "bytes": 1228
+    },
+    "logs/deploys.log": {
+      "sha256": "33abb3b888abf9676da5000bee6ef3d21bbdb531a202c95fb99a3777d28bd9e6",
+      "bytes": 214
+    },
+    "logs/gateway.log": {
+      "sha256": "32612bbc3a7a5faf137689f6d73ed20b4ec08de60c3e93b85cf1900ef947c4d6",
+      "bytes": 204
+    },
+    "logs/inventory.log": {
+      "sha256": "18d775d7bdbcfc4bc580276033e5674dc907f32a19248df17f9ef610138229a1",
+      "bytes": 660
+    },
+    "logs/payment.log": {
+      "sha256": "d483c198e974ab3ea8b6a36029f5995fb5936c7182f3f871adb53d3da76dbebc",
+      "bytes": 1683
+    },
+    "metrics.csv": {
+      "sha256": "8ec9e62fc2eb82d07eebbcf1de7bf1c068f9c14017136df25bbc294070526bf1",
+      "bytes": 2331
+    },
+    "web_cache.json": {
+      "sha256": "562feeba4777544c23f8de21382d714f520aeebd8476f6662154b85765cbb598",
+      "bytes": 205
+    }
+  }
+}

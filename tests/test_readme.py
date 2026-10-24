@@ -2,7 +2,7 @@ import json
 import re
 from pathlib import Path
 
-NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+NUMBER_RE = re.compile(r"(?<![A-Za-z0-9.])(?<!py )-?\d+(?:\.\d+)?")
 RESULTS_RE = re.compile(r"<!-- RESULTS_START -->(.*)<!-- RESULTS_END -->", re.S)
 
 
@@ -33,6 +33,19 @@ def _close(left: float, right: float) -> bool:
     return abs(left - right) <= 1e-9 * max(1.0, abs(right))
 
 
+def _shown(number: float, allowed: set[float]) -> bool:
+    """A displayed figure is a committed value, or that value rounded to three decimal places."""
+    from orbit_agents.eval.readme import display_number
+
+    for item in allowed:
+        if _close(number, item):
+            return True
+        shown = float(display_number(item))
+        if _close(number, shown):
+            return True
+    return False
+
+
 def test_readme_numbers_come_from_committed_files():
     readme = Path("README.md").read_text(encoding="utf-8")
     results_match = RESULTS_RE.search(readme)
@@ -58,7 +71,7 @@ def test_readme_numbers_come_from_committed_files():
         allowed_outside |= _json_numbers(path)
 
     def missing(text, allowed):
-        return [number for number in _numbers(text) if not any(_close(number, item) for item in allowed)]
+        return [number for number in _numbers(text) if not _shown(number, allowed)]
 
     assert missing(results_text, result_numbers) == []
     assert missing(outside, allowed_outside) == []
@@ -78,6 +91,11 @@ def test_results_block_matches_the_generator():
     readme = Path("README.md").read_text(encoding="utf-8")
     assert updated_readme() == readme, "run python -m orbit_agents.eval.readme"
     assert "| Team distill | not scored | | | |" in render()
+    assert "pending" in render()
+    assert "QLoRA on a T4" in render()
+    assert "task-success gain" not in render()
+    assert "task-success gain" not in readme.lower()
+    assert "mcp" not in readme.lower()
 
 
 def test_generator_adds_measured_v3_rows_only(tmp_path):
@@ -98,3 +116,26 @@ def test_generator_adds_measured_v3_rows_only(tmp_path):
     assert "| Team base | not scored | | | |" in block
     assert "no v3 difference is claimed" in block
     assert "scored only under harness v3 below" in block
+
+
+def test_readme_figures_match_the_measured_files():
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "docs/build_figures.py", "--check"])
+    hero = Path("docs/hero.svg").read_text(encoding="utf-8")
+    architecture = Path("docs/architecture.svg").read_text(encoding="utf-8")
+    from orbit_agents.eval.readme import display_number
+
+    base = json.loads(Path("results/v2_qwen1.5b/team_base.json").read_text(encoding="utf-8"))
+    lora = json.loads(Path("results/v2_qwen1.5b/team_lora.json").read_text(encoding="utf-8"))
+    assert display_number(base["schema_valid_rate"]) in hero
+    assert display_number(lora["schema_valid_rate"]) in hero
+    assert f"{base['n_success']} of {base['n_tasks']}" in hero
+    assert f"{lora['n_success']} of {lora['n_tasks']}" in hero
+    assert "pending" in hero
+    assert "not measured" in hero
+    assert "grounding gate" in architecture.lower()
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "docs/hero.svg" in readme
+    assert "docs/architecture.svg" in readme

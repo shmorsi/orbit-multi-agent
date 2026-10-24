@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from orbit_agents.paths import ROOT
@@ -40,6 +41,24 @@ V3_PAIRS = (
     ("team_distill_minus_team_lora", "team distill minus team plus adapter"),
     ("team_lora_minus_team_base", "team plus adapter minus team base"),
 )
+PENDING_API = (
+    ("team_v1", "Claude policy, three-role team, harness v3", "results/v3_api/<model>/team_v1.json"),
+    ("team_v2", "Claude policy, six-role team, harness v3", "results/v3_api/<model>/team_v2.json"),
+    ("team_v3", "Claude policy, round table, harness v3", "results/v3_api/<model>/team_v3.json"),
+)
+
+
+def display_number(value: int | float) -> str:
+    """Show an int as digits and a float to three decimal places.
+
+    This is display rounding of a committed value. The JSON file keeps the full number.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"not a measured number: {type(value).__name__}")
+    if isinstance(value, int):
+        return str(value)
+    quantized = Decimal(str(value)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+    return format(quantized, "f")
 
 
 def _read(path: Path) -> dict | None:
@@ -54,8 +73,15 @@ def _measured(payload: dict | None) -> bool:
 
 def _row(label: str, payload: dict) -> str:
     return (
-        f"| {label} | {payload['n_success']} of {payload['n_tasks']} | {payload['task_success_rate']} "
-        f"| {payload['schema_valid_rate']} | {payload['n_correct_refusals']} of {payload['n_traps']} |"
+        f"| {label} | {payload['n_success']} of {payload['n_tasks']} | {display_number(payload['task_success_rate'])} "
+        f"| {display_number(payload['schema_valid_rate'])} | {payload['n_correct_refusals']} of {payload['n_traps']} |"
+    )
+
+
+def _interval(interval: dict) -> str:
+    return (
+        f"{display_number(interval['low'])} to {display_number(interval['high'])} "
+        f"(point {display_number(interval['point'])})"
     )
 
 
@@ -86,8 +112,8 @@ def _v2(root: Path, distill_v3: bool) -> list[str]:
     lines = [
         f"Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, {run['n_train_dialogs']} "
         f"train dialogues and {run['n_tune_dialogs']} tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went "
-        f"from {loss['first_logged_loss']} at step {loss['first_logged_step']} to {loss['last_logged_loss']} at step "
-        f"{loss['last_logged_step']}. Task success did not clear zero.",
+        f"from {display_number(loss['first_logged_loss'])} at step {loss['first_logged_step']} to "
+        f"{display_number(loss['last_logged_loss'])} at step {loss['last_logged_step']}. Task success did not clear zero.",
         "",
         *_table_head(),
     ]
@@ -99,10 +125,13 @@ def _v2(root: Path, distill_v3: bool) -> list[str]:
             "",
             "The adapter's two answerable successes sit next to a missed trap: correct refusals went from "
             f"{runs['team_base']['n_correct_refusals']} to {runs['team_lora']['n_correct_refusals']}. The paired "
-            f"bootstrap for task success, adapter minus team base, is {success['low']} to {success['high']} (point "
-            f"{success['point']}). That interval includes zero, so the task-success gain is not statistically "
-            f"significant. The same pair's schema-valid interval is {schema['low']} to {schema['high']} (point "
-            f"{schema['point']}). Schema-valid rate moved. Task success did not, on this 12-task set.",
+            f"bootstrap for task success, adapter minus team base, is {_interval(success)}. {_zero(success)} "
+            f"The adapter is not separated from the base team on task success. The same pair's schema-valid interval "
+            f"is {_interval(schema)}. {_zero(schema)} Schema-valid rate moved. Task success did not, on this "
+            f"{runs['team_base']['n_tasks']}-task set.",
+            "",
+            "![Logged training loss for the measured Qwen2.5-1.5B QLoRA run. The curve is the committed file.]"
+            "(results/v2_qwen1.5b/loss_curve.png)",
             "",
         ]
     )
@@ -125,12 +154,13 @@ def _v1(root: Path) -> str:
     runs = [_read(folder / f"{key}.json") for key, _label in RUNS[:3]]
     loss = _read(folder / "loss_summary.json")
     successes = ", ".join(f"{run['n_success']} of {run['n_tasks']}" for run in runs[:2])
-    schema = ", ".join(str(run["schema_valid_rate"]) for run in runs[:2])
+    schema = ", ".join(display_number(run["schema_valid_rate"]) for run in runs[:2])
     return (
         f"The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were {successes}, then "
         f"{runs[2]['n_success']} of {runs[2]['n_tasks']}, with schema-valid rates {schema}, and "
-        f"{runs[2]['schema_valid_rate']}. Logged loss went from {loss['first_logged_loss']} to "
-        f"{loss['last_logged_loss']}. Its task-success interval also failed to clear zero. Fine-tuning taught the format."
+        f"{display_number(runs[2]['schema_valid_rate'])}. Logged loss went from "
+        f"{display_number(loss['first_logged_loss'])} to {display_number(loss['last_logged_loss'])}. "
+        "Its task-success interval also failed to clear zero. Fine-tuning taught the format."
     )
 
 
@@ -171,9 +201,8 @@ def _v3(root: Path) -> list[str]:
         success = pair["task_success_rate"]
         schema = pair["schema_valid_rate"]
         sentences.append(
-            f"The paired bootstrap for task success, {label}, is {success['low']} to {success['high']} (point "
-            f"{success['point']}). {_zero(success)} Its schema-valid interval is {schema['low']} to {schema['high']} "
-            f"(point {schema['point']})."
+            f"The paired bootstrap for task success, {label}, is {_interval(success)}. {_zero(success)} "
+            f"Its schema-valid interval is {_interval(schema)}."
         )
     lines.append(" ".join(sentences))
     return lines
@@ -226,22 +255,84 @@ def _api(root: Path) -> list[str]:
         if comparison and comparison.get("status") == "measured":
             pair = comparison.get("pairs", {}).get("team_v2_minus_team_v1")
         if pair is None:
-            lines.append("The paired comparison needs both teams measured on this model. It is not in yet, so no difference is claimed.")
+            lines.append(
+                "The paired comparison needs both teams measured on this model. It is not in yet, so no difference is claimed."
+            )
         else:
             success = pair["task_success_rate"]
             schema = pair["schema_valid_rate"]
             lines.append(
-                f"The paired bootstrap for task success, v2 team minus v1 team, is {success['low']} to {success['high']} "
-                f"(point {success['point']}). {_zero(success)} Its schema-valid interval is {schema['low']} to "
-                f"{schema['high']} (point {schema['point']})."
+                f"The paired bootstrap for task success, v2 team minus v1 team, is {_interval(success)}. "
+                f"{_zero(success)} Its schema-valid interval is {_interval(schema)}. {_zero(schema)}"
             )
+    return lines
+
+
+def _pending(root: Path) -> list[str]:
+    """Slots with no measured file. The row is a placeholder, not a result."""
+    slots: list[tuple[str, str]] = []
+    folder = root / "results" / "v3_qwen1.5b"
+    for key, label in RUNS:
+        if _measured(_read(folder / f"{key}.json")):
+            continue
+        name = f"{label}, harness v3"
+        if key == "team_distill":
+            name = "Team distill, QLoRA on a T4, harness v3"
+        slots.append((name, f"results/v3_qwen1.5b/{key}.json"))
+    api = root / "results" / "v3_api"
+    seen = {key: False for key, _label, _path in PENDING_API}
+    if api.is_dir():
+        for model_dir in api.iterdir():
+            if not model_dir.is_dir():
+                continue
+            for key, _label, _path in PENDING_API:
+                if _measured(_read(model_dir / f"{key}.json")):
+                    seen[key] = True
+    for key, label, path in PENDING_API:
+        if not seen[key]:
+            slots.append((label, path))
+    if not slots:
+        return ["", "No pending model slot. Every configured score file is measured."]
+    if seen["team_v1"] or seen["team_v2"]:
+        intro = (
+            "Pending slots. A row here is not a result. The round table and the QLoRA distill run on a T4 stay here "
+            "until a measured file exists. The v3 rescores of the archived runs stay here for the same reason."
+        )
+    else:
+        intro = (
+            "Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, the round table, and the "
+            "QLoRA distill run on a T4, stay here until a measured file exists. The v3 rescores of the archived runs "
+            "stay here for the same reason."
+        )
+    lines = [
+        "",
+        intro,
+        "",
+        "| Slot | File | Status |",
+        "| --- | --- | --- |",
+    ]
+    lines.extend(f"| {label} | `{path}` | pending |" for label, path in slots)
     return lines
 
 
 def render(root: Path = ROOT) -> str:
     """Render the Key results block from the committed result files."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
-    lines = [START, *_v2(root, distill), "", *_v3(root), *_round_table(root), *_api(root), END]
+    lines = [
+        START,
+        (
+            "Rates, losses, and intervals below are the committed values, shown to three decimal places. "
+            "The JSON files hold the full values."
+        ),
+        "",
+        *_v2(root, distill),
+        "",
+        *_v3(root),
+        *_round_table(root),
+        *_api(root),
+        *_pending(root),
+        END,
+    ]
     return "\n".join(lines)
 
 

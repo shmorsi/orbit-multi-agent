@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from orbit_agents.corpus import CORPUS, TABLES, read_text
+from orbit_agents.corpus import TABLES, active_corpus, read_text
 from orbit_agents.schema import TOOL_SCHEMAS, validate
 
 _ALLOWED_NODES = {
@@ -236,26 +236,30 @@ def _tokens(text: str) -> set[str]:
 
 def _search_cards() -> list[tuple[str, str, int]]:
     """Notes first, then a card per table and log. Equal overlap keeps the note."""
+    root = active_corpus()
     cards: list[tuple[str, str, int]] = []
-    docs = CORPUS / "docs"
+    docs = root / "docs"
     if docs.is_dir():
         for path in sorted(docs.glob("*.md")):
-            relative = path.relative_to(CORPUS).as_posix()
+            relative = path.relative_to(root).as_posix()
             for block in path.read_text(encoding="utf-8").split("\n\n"):
                 text = block.strip()
                 if text and not text.startswith("#"):
                     cards.append((relative, text, 0))
     for name, relative in sorted(TABLES.items()):
-        header = (CORPUS / relative).read_text(encoding="utf-8").splitlines()[0].strip()
+        table_path = root / relative
+        if not table_path.is_file():
+            continue
+        header = table_path.read_text(encoding="utf-8").splitlines()[0].strip()
         text = (
             f"Table {name} is file {relative} with columns {header}. "
             f"Read it in python with table('{name}')."
         )
         cards.append((relative, text, 1))
-    logs = CORPUS / "logs"
+    logs = root / "logs"
     if logs.is_dir():
         for path in sorted(logs.glob("*.log")):
-            relative = path.relative_to(CORPUS).as_posix()
+            relative = path.relative_to(root).as_posix()
             text = f"Log file {relative}. Read it in python with text('{relative}') or read_file."
             cards.append((relative, text, 1))
     return cards
@@ -276,7 +280,10 @@ def run_retrieve(query: str) -> dict:
 
 def run_web_search(query: str) -> dict:
     """Offline cache only. This function does not import a network client."""
-    payload = json.loads((CORPUS / "web_cache.json").read_text(encoding="utf-8"))
+    cache = active_corpus() / "web_cache.json"
+    if not cache.is_file():
+        return {"ok": False, "error": "no offline web cache in this corpus"}
+    payload = json.loads(cache.read_text(encoding="utf-8"))
     query_tokens = _tokens(query)
     hits = []
     for page in payload["pages"]:

@@ -879,7 +879,13 @@ def default_transport(url: str, headers: dict, payload: dict, timeout: float) ->
         raw = exc.read()
         status = int(exc.code)
     except urllib.error.URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            return 504, {"error": {"message": f"client read timeout after {timeout}s"}}
         raise NetworkStop(str(exc.reason)) from exc
+    except TimeoutError:
+        # A read timeout is treated like a gateway timeout: it backs off and
+        # counts toward the request cap like any other server error.
+        return 504, {"error": {"message": f"client read timeout after {timeout}s"}}
     return status, _body_from_raw(raw, status)
 
 
