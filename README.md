@@ -1,33 +1,64 @@
 # Orbit
 
-A team of AI agents that fixes real code and refuses to ship a patch that fails its tests.
+Planner, coder, tests, reviewer. A patch ships when the tests pass.
 
 [![ci](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11%2B-black)](https://www.python.org/downloads/)
 [![license](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 
-[Mission Control](https://shmorsi.github.io/orbit/) · [Portfolio](https://shmorsi.github.io/) · [Orbit Code](#orbit-code) · [Boardroom](#orbit-boardroom) · [Incident](#incident-commander) · [Key results](#key-results) · [Architecture](#architecture) · [Quickstart](#quickstart)
+[Mission Control](https://shmorsi.github.io/orbit/) · [Portfolio](https://shmorsi.github.io/) · [Key results](#key-results) · [Boardroom](#orbit-boardroom) · [Fine-tuning](#fine-tuning) · [Orbit Code](#orbit-code) · [Architecture](#architecture) · [Quickstart](#quickstart)
 
 <p align="center">
   <img src="docs/orbit-code.gif" alt="Orbit Code replay. A scripted demo, not a score. The planner writes the fix, the coder edits a sandbox, the tests go from failed to passed, and the reviewer accepts the patch.">
 </p>
 
-The clip is a scripted demo. It follows an oracle on a toy bug. It is not a model score. The current split, `code-eval-v2`, is pending, not scored. An earlier split was measured and is superseded: the team pipeline stopped when the planner reply failed the schema, and a critic accept ended a red build before the coder could revise. That record stays in `results/code/claude-haiku-5-5/`.
+The clip is a scripted demo. It follows an oracle on a toy bug. It is not the score. The table is the score.
 
 ## Key results
 
 <!-- RESULTS_START -->
-Rates, losses, and intervals below are the committed values, shown to three decimal places. The JSON files hold the full values.
-
 Orbit Code, frozen split `code-eval-v2`. A row is filled only from a measured file under `results/code_v2/`. Anything else is pending, not scored.
 
 | Config | Model | pass@1 | Tests-passed rate | Reviewer rejections | Tokens | Cost USD |
 | --- | --- | --- | --- | --- | --- | --- |
-| Single agent | pending | pending, not scored | | | | |
-| Team with reviewer | pending | pending, not scored | | | | |
+| Single agent | `claude-haiku-5-5` | 27 of 32 | 0.844 | 2 of 32 | 9250 in, 11494 out | 0.007 |
+| Team with reviewer | `claude-haiku-5-5` | 29 of 32 | 0.906 | 1 of 32 | 37058 in, 29313 out | 0.018 |
 | Single agent, local Qwen | pending | pending, not scored | | | | |
 
+The paired bootstrap for pass@1, team with reviewer minus single agent, is 0.000 to 0.156 (point 0.063). That interval includes zero, so the difference is not significant. n is 32.
+
 The earlier split `code-eval-v1` was scored and is superseded. The team pipeline refused a task when the planner reply failed the schema, and a critic accept stopped a red build before the coder could revise. Those files stay at `results/code/claude-haiku-5-5/` as the record of that run. They are not the current score.
+<!-- RESULTS_END -->
+
+```mermaid
+%%{init: {"theme": "dark", "themeVariables": {"background": "#000000", "primaryColor": "#000000", "primaryTextColor": "#f5f5f7", "primaryBorderColor": "#8ec5ff", "lineColor": "#a8a8ad", "fontFamily": "Inter Tight, Helvetica, Arial, sans-serif"}}}%%
+flowchart LR
+  issue[Issue] --> planner[Planner]
+  planner --> coder[Coder]
+  coder --> tests[Test runner]
+  tests --> critic[Critic]
+  critic -->|revise| coder
+  tests --> reviewer[Reviewer]
+  reviewer -->|reject| coder
+  reviewer -->|accept| trace[JSONL trace]
+```
+
+## Orbit Boardroom
+
+<p align="center">
+  <img src="docs/orbit-boardroom.gif" alt="Orbit Boardroom replay. A scripted demo on fictional company files. The auditor refuses a revenue figure the financials do not support.">
+</p>
+
+Scripted demo on fictional data. Not a model score. CEO, CFO, CTO, and COO draft a launch memo. The auditor checks each claim against the files and refuses a revenue figure the CSV contradicts. The memo keeps only the claims the files support.
+
+`make traces-boardroom` rewrites `mission/traces/boardroom/`.
+
+## Fine-tuning
+
+Archived v2 is the first table. The harness-v3 rescore follows it. A task-success interval that includes zero is not a significant difference.
+
+<!-- FINETUNE_START -->
+Rates, losses, and intervals below are the committed values, shown to three decimal places. The JSON files hold the full values.
 
 Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, 307 train dialogues and 71 tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went from 1.152 at step 10 to 0.051 at step 150. Task success did not clear zero.
 
@@ -76,20 +107,7 @@ Pending slots. A row here is not a result. The round table stays here until a me
 | Slot | File | Status |
 | --- | --- | --- |
 | Claude policy, round table, harness v3 | `results/v3_api/<model>/team_v3.json` | pending |
-<!-- RESULTS_END -->
-
-```mermaid
-%%{init: {"theme": "dark", "themeVariables": {"background": "#000000", "primaryColor": "#000000", "primaryTextColor": "#f5f5f7", "primaryBorderColor": "#8ec5ff", "lineColor": "#a8a8ad", "fontFamily": "Inter Tight, Helvetica, Arial, sans-serif"}}}%%
-flowchart LR
-  issue[Issue] --> planner[Planner]
-  planner --> coder[Coder]
-  coder --> tests[Test runner]
-  tests --> critic[Critic]
-  critic -->|revise| coder
-  tests --> reviewer[Reviewer]
-  reviewer -->|reject| coder
-  reviewer -->|accept| trace[JSONL trace]
-```
+<!-- FINETUNE_END -->
 
 ## Orbit Code
 
@@ -119,19 +137,9 @@ python -m orbit_agents.eval.score_code --config single --provider anthropic --mo
 python -m orbit_agents.eval.readme
 ```
 
-Those commands write `results/code_v2/<model>/team.json` and `results/code_v2/<model>/single.json`. Until those files are measured, the table above says pending, not scored. This checkout does not contain an API key, so those rows are pending. A `code-eval-v1` file that is already measured is left in place.
+Those commands write `results/code_v2/<model>/team.json` and `results/code_v2/<model>/single.json`. A file that is already measured is left in place. The local Qwen row stays pending until that file exists. A `code-eval-v1` file that is already measured is left in place.
 
 `make traces-code` rewrites the scripted Mission Control traces: one repair, and one patch the reviewer rejects because it edits a test.
-
-## Orbit Boardroom
-
-<p align="center">
-  <img src="docs/orbit-boardroom.gif" alt="Orbit Boardroom replay. A scripted demo on fictional company files. The auditor refuses a revenue figure the financials do not support.">
-</p>
-
-Scripted demo on fictional data. Not a model score. CEO, CFO, CTO, and COO draft a launch memo. The auditor checks each claim against the files and refuses a revenue figure the CSV contradicts. The memo keeps only the claims the files support.
-
-`make traces-boardroom` rewrites `mission/traces/boardroom/`.
 
 ## Incident commander
 
@@ -139,25 +147,25 @@ Scripted demo on fictional data. Not a model score. CEO, CFO, CTO, and COO draft
   <img src="docs/incident-commander.gif" alt="Incident commander replay. A scripted harness on a fictional checkout outage. The commander assigns steps, the engineer counts log lines, and the code gate refuses an inventory root cause the files do not support.">
 </p>
 
-The clip is a scripted demo. The corpus is fictional. It is lower on the page because Orbit Code is the headline. The measured makerspace numbers are in Key results, not in this outage.
+The clip is a scripted demo. The corpus is fictional. Orbit Code is the headline. The fine-tuning numbers are in the section above, not in this outage.
 
 ## Why this matters
 
-Hiring teams want an agent that edits code, runs the tests, and does not ship a red build. Orbit Code is a small, inspectable version of that loop. The same idea shows up in the boardroom: a claim stays only when the file states it.
+Hiring teams want an agent that edits code, runs the tests, and does not ship a red build. Orbit Code is that loop, small enough to read. The boardroom demo uses the same rule: a claim stays only when the file states it.
 
-The measured runs underneath are still the three-role team on the makerspace corpus. Fine-tuning taught the format. It did not separate the runs on task success. Those files stay in `results/v2_qwen1.5b/`.
+The code-eval-v2 score is in Key results. The pass@1 interval includes zero, so the team is not separated from the single agent on that split. Fine-tuning on the makerspace corpus taught the format. Its task-success intervals include zero. Those files stay in `results/v2_qwen1.5b/` and `results/v3_qwen1.5b/`.
 
 ## Architecture
 
 <p align="center">
-  <img src="docs/hero.svg" alt="Orbit Code. The code benchmark is pending, not scored. The makerspace schema-valid and task-success figures in the picture are the measured files.">
+  <img src="docs/hero.svg" alt="Orbit Code pass@1 on code-eval-v2. The picture reads the measured files. Local Qwen is pending, not measured.">
 </p>
 
 <p align="center">
   <img src="docs/architecture.svg" alt="Architecture. Issue, planner, coder, tests, critic, reviewer. The reviewer is the grounding gate.">
 </p>
 
-`docs/build_figures.py` draws both pictures from the measured files and the engine constants. The code benchmark has no measured pass rate, so the picture does not invent one.
+`docs/build_figures.py` draws both pictures from the measured files and the engine constants.
 
 **Planner.** One JSON object. The steps say what to change. The planner does not edit files.
 
@@ -206,7 +214,7 @@ python -m orbit_agents.serve
 
 ## v2: six roles
 
-`--team v2` runs the same tasks, tools, and grounding gate with six seats instead of three. `--team v1` stays the default, so every number on this page is a v1 team result.
+`--team v2` runs the same tasks, tools, and grounding gate with six seats instead of three. `--team v1` stays the default. The six-role API score is in Fine-tuning. It is not the Orbit Code score.
 
 ```mermaid
 flowchart LR
@@ -297,14 +305,14 @@ make score-v3 MODEL=claude-haiku-5-5
 
 Future work, not a claim about a result:
 
-- Score Orbit Code on `code-eval-v2` once with `make score-code` and let the generator fill the pass@1 row. Dry-run first. It prints the request bound and the cost cap.
+- Score the local Qwen row on `code-eval-v2` once and let the generator fill it. The `claude-haiku-5-5` rows are already measured. Dry-run first. It prints the request bound and the cost cap.
 - Score the round table once with `make score-v3` and let the generator add that row. The three-role and six-role API scores are already measured.
 - Keep the archived v2 numbers in `results/v2_qwen1.5b/`. The harness-v3 rescore, including team distill, is a separate table.
 - Train more than one seed before talking about a distribution. This page has one training run per config.
 
 ## Limitations
 
-- Orbit Code on `code-eval-v2` is pending, not scored. The lead clip is a scripted demo. The coder returns full file contents for short modules. It is not a repo-scale software engineer. The earlier split is superseded because the team harness stopped a red build before the coder could revise, and that record is not the current score.
+- Orbit Code on `code-eval-v2` was scored once per config. The pass@1 interval includes zero, so that difference is not significant. The lead clip is a scripted demo. The coder returns full file contents for short modules. It is not a repo-scale software engineer. The earlier split is superseded because the team harness stopped a red build before the coder could revise, and that record is not the current score.
 - The Boardroom clip is a scripted demo on fictional files. It is not a score and it is not advice.
 - The frozen test is 12 tasks, 2 of them traps. One task moves a rate by a twelfth, so only large effects can clear zero.
 - Each model was trained once and scored once. There is no seed sweep.

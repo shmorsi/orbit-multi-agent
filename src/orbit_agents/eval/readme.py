@@ -28,7 +28,10 @@ from orbit_agents.paths import ROOT
 
 START = "<!-- RESULTS_START -->"
 END = "<!-- RESULTS_END -->"
+FINE_START = "<!-- FINETUNE_START -->"
+FINE_END = "<!-- FINETUNE_END -->"
 BLOCK_RE = re.compile(re.escape(START) + r".*?" + re.escape(END), re.S)
+FINE_RE = re.compile(re.escape(FINE_START) + r".*?" + re.escape(FINE_END), re.S)
 
 RUNS = (
     ("single_base", "Single base"),
@@ -403,14 +406,19 @@ def _code(root: Path) -> list[str]:
         )
         lines.extend(["", _V1_SUPERSEDED])
         return lines
+    pair_lines: list[str] = []
+    seen_dirs: list[Path] = []
     for payload in measured:
         tokens, cost = _code_cells(payload)
         lines.append(
             f"| {payload.get('config_label', payload['config'])} | `{payload['model']}` | "
-            f"{display_number(payload['pass_at_1'])} | {display_number(payload['tests_passed_rate'])} | "
+            f"{display_number(payload['n_pass'])} of {display_number(payload['n_tasks'])} | "
+            f"{display_number(payload['tests_passed_rate'])} | "
             f"{display_number(payload['n_reviewer_rejections'])} of {display_number(payload['n_tasks'])} | "
             f"{tokens} | {cost} |"
         )
+    if folder.is_dir():
+        seen_dirs = sorted(path for path in folder.iterdir() if path.is_dir())
     have_single = any(item.get("config") == "single" and item.get("provider") != "transformers" for item in measured)
     have_team = any(item.get("config") == "team" for item in measured)
     have_qwen = any(
@@ -422,21 +430,49 @@ def _code(root: Path) -> list[str]:
         lines.append("| Team with reviewer | pending | pending, not scored | | | | |")
     if not have_qwen:
         lines.append("| Single agent, local Qwen | pending | pending, not scored | | | | |")
+    for model_dir in seen_dirs:
+        single = _read(model_dir / "single.json")
+        team = _read(model_dir / "team.json")
+        if _measured_code(single) and _measured_code(team) and single.get("provider") != "transformers":
+            pair_lines.extend(_code_pair_lines(model_dir))
+    if pair_lines:
+        lines.extend(["", *pair_lines])
     lines.extend(["", _V1_SUPERSEDED])
     return lines
 
 
-def render(root: Path = ROOT) -> str:
-    """Render the Key results block from the committed result files."""
+def _code_pair_lines(model_dir: Path) -> list[str]:
+    """Paired pass@1 interval for one model directory, or an explicit non-claim."""
+    comparison = _read(model_dir / "comparison.json")
+    pair = None
+    if comparison and comparison.get("status") == "measured":
+        pair = comparison.get("pairs", {}).get("team_minus_single", {}).get("pass_at_1")
+    if not pair:
+        return [
+            "The paired comparison of team with reviewer minus single agent is not in this directory, "
+            "so no pass@1 difference is claimed."
+        ]
+    return [
+        "The paired bootstrap for pass@1, team with reviewer minus single agent, is "
+        f"{_interval(pair)}. {_significance(pair)} n is {display_number(pair['n'])}."
+    ]
+
+
+def render_results(root: Path = ROOT) -> str:
+    """The headline block: Orbit Code on code-eval-v2."""
+    lines = [START, *_code(root), END]
+    return "\n".join(lines)
+
+
+def render_finetune(root: Path = ROOT) -> str:
+    """Archived makerspace runs, then the harness-v3 Qwen table."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
     lines = [
-        START,
+        FINE_START,
         (
             "Rates, losses, and intervals below are the committed values, shown to three decimal places. "
             "The JSON files hold the full values."
         ),
-        "",
-        *_code(root),
         "",
         *_v2(root, distill),
         "",
@@ -444,18 +480,25 @@ def render(root: Path = ROOT) -> str:
         *_round_table(root),
         *_api(root),
         *_pending(root),
-        END,
+        FINE_END,
     ]
     return "\n".join(lines)
 
 
+def render(root: Path = ROOT) -> str:
+    """Render both generated blocks from the committed result files."""
+    return render_results(root) + "\n" + render_finetune(root)
+
+
 def updated_readme(root: Path = ROOT) -> str:
-    """Return README.md with the Key results block replaced by render()."""
+    """Return README.md with both generated blocks replaced."""
     text = (root / "README.md").read_text(encoding="utf-8")
     if not BLOCK_RE.search(text):
         raise SystemExit("README.md has no RESULTS_START/RESULTS_END block")
-    block = render(root)
-    return BLOCK_RE.sub(lambda _match: block, text, count=1)
+    if not FINE_RE.search(text):
+        raise SystemExit("README.md has no FINETUNE_START/FINETUNE_END block")
+    text = BLOCK_RE.sub(lambda _match: render_results(root), text, count=1)
+    return FINE_RE.sub(lambda _match: render_finetune(root), text, count=1)
 
 
 def main(argv: list[str] | None = None) -> None:

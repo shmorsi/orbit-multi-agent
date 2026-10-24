@@ -90,6 +90,22 @@ def test_readme_numbers_come_from_committed_files():
     assert "%" not in results_text
 
 
+def test_code_v2_comparison_is_the_repo_bootstrap():
+    from orbit_agents.eval.metrics import bootstrap_mean_difference
+
+    folder = Path("results/code_v2/claude-haiku-5-5")
+    single = json.loads((folder / "single.json").read_text(encoding="utf-8"))
+    team = json.loads((folder / "team.json").read_text(encoding="utf-8"))
+    comparison = json.loads((folder / "comparison.json").read_text(encoding="utf-8"))
+    order = [row["id"] for row in single["per_task"]]
+    assert order == [row["id"] for row in team["per_task"]]
+    by_single = {row["id"]: row for row in single["per_task"]}
+    by_team = {row["id"]: row for row in team["per_task"]}
+    treatment = [1.0 if by_team[task_id]["pass"] else 0.0 for task_id in order]
+    control = [1.0 if by_single[task_id]["pass"] else 0.0 for task_id in order]
+    assert comparison["pairs"]["team_minus_single"]["pass_at_1"] == bootstrap_mean_difference(treatment, control)
+
+
 def test_results_block_matches_the_generator():
     from orbit_agents.eval.readme import render, updated_readme
 
@@ -100,7 +116,14 @@ def test_results_block_matches_the_generator():
     assert "pending" in block
     assert "code-eval-v2" in block
     assert "superseded" in block
-    assert "| Single agent | pending | pending, not scored | | | | |" in block
+    assert "| Single agent, local Qwen | pending | pending, not scored | | | | |" in block
+    single = json.loads(Path("results/code_v2/claude-haiku-5-5/single.json").read_text(encoding="utf-8"))
+    team = json.loads(Path("results/code_v2/claude-haiku-5-5/team.json").read_text(encoding="utf-8"))
+    comparison = json.loads(Path("results/code_v2/claude-haiku-5-5/comparison.json").read_text(encoding="utf-8"))
+    pair = comparison["pairs"]["team_minus_single"]["pass_at_1"]
+    assert f"| Single agent | `{single['model']}` | {single['n_pass']} of {single['n_tasks']} |" in block
+    assert f"| Team with reviewer | `{team['model']}` | {team['n_pass']} of {team['n_tasks']} |" in block
+    assert pair["low"] <= 0 <= pair["high"]
     assert "not significant" in block
     lora = json.loads(Path("results/v3_qwen1.5b/team_lora.json").read_text(encoding="utf-8"))
     assert f"| Team plus adapter | {lora['n_success']} of {lora['n_tasks']} |" in block

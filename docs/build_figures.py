@@ -244,64 +244,130 @@ def api_story(root: Path = ROOT) -> dict[str, str] | None:
     return None
 
 
+def code_story(root: Path = ROOT) -> dict[str, str] | None:
+    """Measured code-eval-v2 pass@1 pair, when both runs and the comparison exist."""
+    folder = root / "results" / "code_v2"
+    if not folder.is_dir():
+        return None
+    for model_dir in sorted(path for path in folder.iterdir() if path.is_dir()):
+        single_path = model_dir / "single.json"
+        team_path = model_dir / "team.json"
+        comparison_path = model_dir / "comparison.json"
+        if not (single_path.is_file() and team_path.is_file() and comparison_path.is_file()):
+            continue
+        single = _read(single_path)
+        team = _read(team_path)
+        comparison = _read(comparison_path)
+        if single.get("status") != "measured" or team.get("status") != "measured":
+            continue
+        if single.get("protocol") != "code-eval-v2" or team.get("protocol") != "code-eval-v2":
+            continue
+        if comparison.get("status") != "measured":
+            continue
+        pair = comparison.get("pairs", {}).get("team_minus_single", {}).get("pass_at_1")
+        if not pair:
+            continue
+        return {
+            "single_pass": f"{single['n_pass']} of {single['n_tasks']}",
+            "team_pass": f"{team['n_pass']} of {team['n_tasks']}",
+            "phrase": _phrase(pair),
+            "single_reject": f"{single['n_reviewer_rejections']} of {single['n_tasks']}",
+            "team_reject": f"{team['n_reviewer_rejections']} of {team['n_tasks']}",
+            "single_cost": display_number(single["usage"]["estimated_cost_usd"]),
+            "team_cost": display_number(team["usage"]["estimated_cost_usd"]),
+            "model": str(single["model"]),
+            "n": str(pair["n"]),
+        }
+    return None
+
+
 def hero_svg(root: Path = ROOT) -> str:
     facts = story(root)
-    api = api_story(root)
-    if api is None:
+    code = code_story(root)
+    archive = (
+        f"Archived makerspace schema-valid {facts['base_schema']} to {facts['lora_schema']}. "
+        f"Task success {facts['base_success']} to {facts['lora_success']}. "
+        "Local Qwen is pending, not measured."
+    )
+    if code is None:
         desc = (
             f"Schema-valid rate {facts['base_schema']} to {facts['lora_schema']}, {facts['schema_phrase']}. "
             f"Task success {facts['base_success']} to {facts['lora_success']}, {facts['success_phrase']}. "
-            f"Model {facts['model']}. Claude v1, Claude v2, and the T4 distill run are pending, not measured."
+            f"Model {facts['model']}. code-eval-v2 is pending, not measured. {archive}"
         )
-        third = (840, "03  PENDING", "Claude v1 and v2", None, "not measured", "T4 QLoRA distill", False)
+        headline = "Fixes real code."
+        subhead = "Refuses a patch that fails its tests."
+        kicker = "code-eval-v2 pending, not scored."
+        columns = (
+            (
+                56,
+                "01  SCHEMA-VALID",
+                facts["base_schema"],
+                facts["lora_schema"],
+                facts["schema_phrase"],
+                "Qwen2.5-1.5B  QLoRA  harness v2",
+                True,
+            ),
+            (
+                448,
+                "02  TASK SUCCESS",
+                facts["base_success"],
+                facts["lora_success"],
+                facts["success_phrase"],
+                "frozen test  one score each",
+                False,
+            ),
+            (840, "03  CODE", "pending", None, "not measured", "code-eval-v2", False),
+        )
+        footer = "FULL VALUES IN results/    THREE DECIMAL PLACES"
     else:
         desc = (
-            f"Schema-valid rate {facts['base_schema']} to {facts['lora_schema']}, {facts['schema_phrase']}. "
-            f"Task success {facts['base_success']} to {facts['lora_success']}, {facts['success_phrase']}. "
-            f"Model {facts['model']}. API task success {api['v1_success']} to {api['v2_success']}, "
-            f"{api['success_phrase']}. API schema-valid {api['schema_phrase']}. "
-            "The round table is pending, not measured. The T4 distill run is in the harness-v3 table."
+            f"Orbit Code pass@1 {code['single_pass']} to {code['team_pass']}, {code['phrase']}. "
+            f"Reviewer rejections {code['single_reject']} to {code['team_reject']}. "
+            f"Cost USD {code['single_cost']} to {code['team_cost']}. Model {code['model']}. {archive}"
         )
-        third = (
-            840,
-            "03  API TASK SUCCESS",
-            api["v1_success"],
-            api["v2_success"],
-            api["success_phrase"],
-            api["model"],
-            False,
+        headline = code["team_pass"]
+        subhead = f"Team with reviewer. Single agent, {code['single_pass']}."
+        kicker = f"pass@1. {code['phrase'].capitalize()}. n is {code['n']}."
+        columns = (
+            (
+                56,
+                "01  PASS@1",
+                code["single_pass"],
+                code["team_pass"],
+                code["phrase"],
+                code["model"],
+                True,
+            ),
+            (
+                448,
+                "02  REVIEWER REJECTIONS",
+                code["single_reject"],
+                code["team_reject"],
+                "one score each",
+                "code-eval-v2",
+                False,
+            ),
+            (
+                840,
+                "03  COST USD",
+                code["single_cost"],
+                code["team_cost"],
+                "estimated from the price table",
+                "one score each",
+                False,
+            ),
         )
+        footer = archive
     canvas = Canvas(1200, 560, "Orbit", desc)
     canvas.grid()
     canvas.rule(56, 1144, 48)
     canvas.text("ORBIT CODE", 56, 82, 13, weight=640, tracking=3.4)
     canvas.text("MULTI-AGENT MISSION CONTROL", 1144, 82, 12, weight=560, fill=MUTED, tracking=2.2, anchor="end")
-    canvas.text("Fixes real code.", 56, 168, 52, weight=640, tracking=-1.0)
-    canvas.text("Refuses a patch that fails its tests.", 56, 214, 26, weight=560, fill=MUTED, tracking=-0.3)
-    canvas.text("code-eval-v2 pending, not scored. Makerspace figures below are measured.", 56, 252, 16, weight=440, fill=DIM)
+    canvas.text(headline, 56, 168, 52, weight=640, tracking=-1.0)
+    canvas.text(subhead, 56, 214, 26, weight=560, fill=MUTED, tracking=-0.3)
+    canvas.text(kicker, 56, 252, 16, weight=440, fill=DIM)
     canvas.rule(56, 1144, 286)
-
-    columns = (
-        (
-            56,
-            "01  SCHEMA-VALID",
-            facts["base_schema"],
-            facts["lora_schema"],
-            facts["schema_phrase"],
-            "Qwen2.5-1.5B  QLoRA  harness v2",
-            True,
-        ),
-        (
-            448,
-            "02  TASK SUCCESS",
-            facts["base_success"],
-            facts["lora_success"],
-            facts["success_phrase"],
-            "frozen test  one score each",
-            False,
-        ),
-        third,
-    )
     for x, label, left, right, phrase, detail, accent in columns:
         canvas.text(label, x, 330, 12, weight=560, fill=ACCENT if accent else DIM, tracking=1.8)
         if accent:
@@ -313,15 +379,7 @@ def hero_svg(root: Path = ROOT) -> str:
         canvas.text(phrase, x, 444, 15, weight=440, fill=MUTED)
         canvas.text(detail, x, 472, 14, weight=440, fill=DIM)
     canvas.rule(56, 1144, 504)
-    canvas.text(
-        "FULL VALUES IN results/v2_qwen1.5b    THREE DECIMAL PLACES",
-        56,
-        536,
-        11,
-        weight=560,
-        fill=DIM,
-        tracking=1.6,
-    )
+    canvas.text(footer, 56, 536, 11, weight=560, fill=DIM, tracking=0.4)
     return canvas.svg()
 
 
