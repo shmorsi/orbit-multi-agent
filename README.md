@@ -1,6 +1,6 @@
 # Orbit
 
-A local planner, worker, and critic that answers a question over a bundled makerspace corpus only when its sandboxed tools support the claim.
+An autonomous incident commander: a local crew that writes the checkout-outage report only when the logs, the metrics, and the runbook support every claim.
 
 [![ci](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/shmorsi/orbit-multi-agent/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11%2B-black)](https://www.python.org/downloads/)
@@ -9,12 +9,18 @@ A local planner, worker, and critic that answers a question over a bundled maker
 [Mission Control](https://shmorsi.github.io/orbit/) · [Portfolio](https://shmorsi.github.io/) · [Architecture](#architecture) · [Key results](#key-results) · [Six roles](#v2-six-roles) · [Round table](#round-table) · [Quickstart](#quickstart) · [Integrity](#reproducibility-and-integrity)
 
 <p align="center">
+  <img src="docs/incident-commander.gif" alt="Incident commander replay. A scripted harness on a fictional checkout outage. The commander assigns steps, the engineer counts log lines, and the code gate refuses an inventory root cause the files do not support.">
+</p>
+
+The clip is a scripted demo. The corpus is fictional. Every measured number on this page comes from the frozen makerspace test, not from this outage.
+
+<p align="center">
   <img src="docs/hero.svg" alt="Orbit. Schema-valid rate 0.607 to 0.780 on the frozen test. Task success 2 of 12 to 3 of 12, interval includes zero. Claude, the round table, and the T4 distill run are pending.">
 </p>
 
 | | |
 | --- | --- |
-| **What it is** | Three roles on one bus for the measured runs. The planner writes at most four steps. The worker calls one sandboxed tool or states a final answer. The critic accepts the claim or sends it back. A grounding gate drops anything the tool results do not support. Six roles and a round table use the same gate. Those teams have not been scored. |
+| **What it is** | The featured replay is an incident commander on a fictional checkout outage: commander, engineer, critic, and a code gate. It is a scripted harness following the oracle, not a model score. The measured runs are three roles on the makerspace corpus. The planner writes at most four steps. The worker calls one sandboxed tool or states a final answer. The critic accepts the claim or sends it back. A grounding gate drops anything the tool results do not support. |
 | **Why it matters** | A tool-calling model can emit valid JSON and still invent the number. Orbit separates those two failures and scores them once on a frozen test. The page reports what landed, including the comparison that did not clear zero. |
 | **Key results** | QLoRA on Qwen2.5-1.5B moved the schema-valid rate from 0.607 to 0.780, shown to three decimal places. That paired interval is above zero. Task success went from 2 of 12 to 3 of 12, and that paired interval includes zero, so the adapter is not separated from the base team on task success. Claude score-v1, Claude score-v2, the round table, and the T4 distill run are pending. |
 
@@ -56,6 +62,8 @@ python -m orbit_agents.serve
 `make setup` also installs the demo stack, then `make test` runs the suite and `make demo` opens the same page. Open the localhost URL the server prints. Pick a bundled task id for the scripted harness. A free-form question needs a model backend. Platform notes are in [Run it locally](#run-it-locally). The development notes, including what not to edit, are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Why this matters
+
+Checkout is failing. The commander assigns the steps. The engineer counts the log lines in code. A red team blames the inventory service. The code gate refuses that root cause because the cited tool result does not support it, and the auditor keeps only the claims the files actually contain. That is the incident commander. The files are a made-up night, and the replay follows the oracle. It shows the protocol. It is not a model score.
 
 Hiring teams want an agent that uses tools and stops when the evidence runs out. Orbit is a small, fully inspectable version of that problem. Every seat returns one JSON object. The tools are sandboxed and nothing in that path opens a socket. A critic can send a claim back. A gate keeps a claim only when the cited tool result contains it, a python call printed it, or it equals a count of matching lines in the cited text.
 

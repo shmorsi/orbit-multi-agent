@@ -173,6 +173,15 @@ function applyHarness(mission, backend) {
   const scripted = isScripted(mission, backend);
   document.getElementById("harness").hidden = !scripted;
   document.getElementById("title-harness").hidden = !scripted;
+  const scenario = document.getElementById("scenario");
+  const incident = Boolean(mission && mission.scenario === "incident");
+  document.body.dataset.scenario = incident ? "incident" : "";
+  if (scenario) {
+    scenario.hidden = !incident;
+    scenario.textContent = incident ? "Incident commander" : "";
+  }
+  const kicker = document.querySelector("#titlecard .kicker");
+  if (kicker) kicker.textContent = incident ? "Incident commander" : "Orbit";
 }
 
 let titleTimer = null;
@@ -215,6 +224,7 @@ function summarize(event) {
   if (payload && payload.action === "tool") return payload.tool;
   if (payload && payload.action === "final") return payload.answer || payload.status;
   if (payload && payload.verdict) return `${payload.verdict}: ${payload.reason || ""}`.trim();
+  if (payload && payload.why && payload.claim) return payload.why;
   if (event.kind === "result") return `${event.tool} ${event.call}`;
   if (event.kind === "revise") return event.reason || "Revise";
   if (event.kind === "invalid") return event.error || "Invalid";
@@ -461,7 +471,12 @@ function refusalText(shown, mission) {
   const bits = [];
   const gate = [...shown].reverse().find((event) => event.kind === "gate" && event.code_verdict === "refuse");
   if (gate) {
-    bits.push("The red team proposed a count the tool results do not contain. The code gate refused it. That claim is not the team's answer.");
+    const blame = gate.claim && gate.claim.name === "inventory_errors";
+    bits.push(
+      blame
+        ? "The red team blamed the inventory service. The cited tool result does not support that root cause. The code gate refused it. That claim is not the team's answer."
+        : "The red team proposed a count the tool results do not contain. The code gate refused it. That claim is not the team's answer.",
+    );
   }
   const audit = [...shown].reverse().find((event) => event.kind === "audit" && event.verdict === "refuse");
   if (audit) bits.push(audit.reason || "The auditor refused the draft because a claim or a number is not in the cited tool results.");
@@ -682,8 +697,31 @@ async function loadIndex() {
   } catch (error) {
     setNotice("");
   }
+  try {
+    const incidentResponse = await fetch("traces/incident/index.json");
+    if (incidentResponse.ok) {
+      const incidentIndex = await incidentResponse.json();
+      const incidentGroup = document.createElement("optgroup");
+      incidentGroup.label = "Incident commander";
+      for (const item of incidentIndex) {
+        const option = document.createElement("option");
+        option.value = `incident/${item.file}`;
+        option.textContent = `${item.task_id} · ${item.status}`;
+        incidentGroup.append(option);
+        index.push({ file: option.value });
+      }
+      select.prepend(incidentGroup);
+    }
+  } catch (error) {
+    setNotice("");
+  }
   const requested = params.get("trace");
-  const choice = index.some((item) => item.file === requested) ? requested : "revise.jsonl";
+  const featured = "incident/report.jsonl";
+  const choice = index.some((item) => item.file === requested)
+    ? requested
+    : index.some((item) => item.file === featured)
+      ? featured
+      : "revise.jsonl";
   if ([...select.options].some((option) => option.value === choice)) select.value = choice;
   await loadTrace(select.value);
 }

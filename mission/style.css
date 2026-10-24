@@ -87,6 +87,15 @@ button, input, select, textarea {
   letter-spacing: 0.18em;
 }
 
+.scenario-chip {
+  color: #8ec5ff;
+  border-color: rgba(142, 197, 255, 0.45);
+}
+
+body[data-scenario="incident"] #titlecard .kicker {
+  color: #8ec5ff;
+}
+
 .meters {
   display: flex;
   gap: 28px;

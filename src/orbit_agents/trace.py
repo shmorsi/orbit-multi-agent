@@ -204,14 +204,77 @@ def bundled_traces_v3(directory: Path | None = None) -> list[Path]:
     return written
 
 
+TRACE_DIR_INCIDENT = TRACE_DIR / "incident"
+INCIDENT_EXAMPLES = (
+    ("report.jsonl", "inc-report"),
+    ("payment.jsonl", "inc-payment-errors"),
+    ("breach.jsonl", "inc-breach"),
+    ("failed.jsonl", "inc-failed"),
+    ("deploy.jsonl", "inc-deploy"),
+    ("revenue.jsonl", "inc-revenue"),
+)
+
+
+def write_trace_incident(path: Path, task: dict, *, harness: str | None = None) -> Path:
+    """Run the incident round table and write its JSONL. The header names the scripted demo."""
+    import shutil
+
+    from orbit_agents.incident import use_incident_corpus
+    from orbit_agents.scripted_incident import IncidentPolicy
+    from orbit_agents.team_v3 import run_team_v3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workspace = path.parent / ".runs" / path.stem
+    with use_incident_corpus():
+        result = run_team_v3(task, IncidentPolicy(task), workspace)
+        text = dump_trace(task, result, harness=harness, team="v3")
+    header, _, rest = text.partition("\n")
+    row = json.loads(header)
+    row["scenario"] = "incident"
+    row["scenario_note"] = "Scripted harness following the oracle on a fictional corpus. Not a model score."
+    path.write_text(json.dumps(row, ensure_ascii=True) + "\n" + rest, encoding="utf-8")
+    shutil.rmtree(workspace, ignore_errors=True)
+    return path
+
+
+def bundled_traces_incident(directory: Path | None = None) -> list[Path]:
+    """Real round-table runs on the incident tasks. The oracle is the harness, not a model."""
+    from orbit_agents.incident import task_by_id
+
+    directory = directory or TRACE_DIR_INCIDENT
+    directory.mkdir(parents=True, exist_ok=True)
+    written = []
+    index = []
+    for name, task_id in INCIDENT_EXAMPLES:
+        task = task_by_id(task_id)
+        path = write_trace_incident(directory / name, task, harness="scripted_harness")
+        header = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+        written.append(path)
+        index.append(
+            {
+                "file": path.name,
+                "team": "v3",
+                "scenario": "incident",
+                "task_id": header["task_id"],
+                "status": header["status"],
+                "question": header["question"],
+                "note": "scripted protocol demo following the oracle, not model skill",
+            }
+        )
+    (directory / "index.json").write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    return written
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Rewrite the bundled traces for v1, v2, or the round table."""
+    """Rewrite the bundled traces for v1, v2, the round table, or the incident demo."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Rewrite the bundled scripted-harness traces")
-    parser.add_argument("--team", choices=("v1", "v2", "v3"), default="v1")
+    parser.add_argument("--team", choices=("v1", "v2", "v3", "incident"), default="v1")
     args = parser.parse_args(argv)
-    if args.team == "v3":
+    if args.team == "incident":
+        paths = bundled_traces_incident()
+    elif args.team == "v3":
         paths = bundled_traces_v3()
     elif args.team == "v2":
         paths = bundled_traces_v2()

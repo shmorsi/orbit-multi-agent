@@ -1,0 +1,56 @@
+[
+  {
+    "file": "report.jsonl",
+    "team": "v3",
+    "scenario": "incident",
+    "task_id": "inc-report",
+    "status": "answer",
+    "question": "On the night of the incident, how many checkout errors came from payment-service, for how many minutes did the payment-service error rate exceed the runbook page threshold, how many orders failed, and which payment-service deploy immediately preceded the spike?",
+    "note": "scripted protocol demo following the oracle, not model skill"
+  },
+  {
+    "file": "payment.jsonl",
+    "team": "v3",
+    "scenario": "incident",
+    "task_id": "inc-payment-errors",
+    "status": "answer",
+    "question": "How many checkout errors came from payment-service on the night of the incident?",
+    "note": "scripted protocol demo following the oracle, not model skill"
+  },
+  {
+    "file": "breach.jsonl",
+    "team": "v3",
+    "scenario": "incident",
+    "task_id": "inc-breach",
+    "status": "answer",
+    "question": "For how many minutes did the payment-service error rate exceed the runbook page threshold?",
+    "note": "scripted protocol demo following the oracle, not model skill"
+  },
+  {
+    "file": "failed.jsonl",
+    "team": "v3",
+    "scenario": "incident",
+    "task_id": "inc-failed",
+    "status": "answer",
+    "question": "How many orders failed on the night of the incident?",
+    "note": "scripted protocol demo following the oracle, not model skill"
+  },
+  {
+    "file": "deploy.jsonl",
+    "team": "v3",
+    "scenario": "incident",
+    "task_id": "inc-deploy",
+    "status": "answer",
+    "question": "Which payment-service deploy immediately preceded the error spike?",
+    "note": "scripted protocol demo following the oracle, not model skill"
+  },
+  {
+    "file": "revenue.jsonl",
+    "team": "v3",
+    "scenario": "incident",
+    "task_id": "inc-revenue",
+    "status": "refuse",
+    "question": "How many dollars of revenue were lost during the checkout incident?",
+    "note": "scripted protocol demo following the oracle, not model skill"
+  }
+]
