@@ -7,7 +7,24 @@ A local language-agent team that calls tools under a schema and refuses any clai
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue)](https://www.python.org/)
 [![Live replay](https://img.shields.io/badge/replay-live-blue)](https://shmorsi.github.io/orbit/)
 
-**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [Why this matters](#why-this-matters) · [Key results](#key-results) · [Six roles](#v2-six-roles) · [Quickstart](#quickstart) · [Integrity](#reproducibility-and-integrity)
+**Live replay:** [shmorsi.github.io/orbit](https://shmorsi.github.io/orbit/) · [Why this matters](#why-this-matters) · [Key results](#key-results) · [Six roles](#v2-six-roles) · [Round table](#round-table) · [Quickstart](#quickstart) · [Integrity](#reproducibility-and-integrity)
+
+![Mission Control replaying a saved engine trace](docs/mission-control.gif)
+
+A refusal means the tools did not support the claim. The red team can propose a count that is not in the tool results. The code gate refuses that count, and it is not the team's answer. The auditor does the same to the draft: a claim or a number missing from the cited tool result is replaced with a refusal. A task is also refused when the corpus has no record that answers it.
+
+| Seat | One line |
+| --- | --- |
+| Coordinator | Opens the table. No tools and no answer. |
+| Commander | Assigns each step to the seat that owns that tool. |
+| Researcher | Reads the corpus. Cannot run code or answer. |
+| Scout | Reads the corpus with the same read tools. |
+| Engineer | Runs code or writes a file. Cannot answer. |
+| Analyst | Drafts the only answer the auditor scores. |
+| Critic | Accepts the draft or sends it back. |
+| Red team | Proposes one claim the tools do not support. |
+| Verifier | The code gate re-checks that claim. The code verdict stands. |
+| Auditor | Refuses the draft when a claim or a number is unsupported. |
 
 ```mermaid
 flowchart LR
@@ -63,8 +80,6 @@ The round-table team is not scored.
 ![Flight-data board for the frozen 1.5B runs: task success, schema-valid rate, the paired bootstrap, training loss, and trap outcomes, with team distill empty](docs/mission-flight-data.png)
 
 <video src="docs/mission-control.mp4" controls muted playsinline aria-label="Mission Control replaying a saved trace, stepping through planner, worker, tool, and critic"></video>
-
-![Mission Control replaying a saved engine trace](docs/mission-control.gif)
 
 ![Mission Control at the moment the critic accepts a grounded claim about printer jobs](docs/mission-replay.png)
 
@@ -163,7 +178,30 @@ make score-v2 MODEL=claude-haiku-5-5
 
 Each target scores the frozen test once and writes `results/v3_api/<model>/team_v1.json` or `team_v2.json`. It refuses a config that is already measured. The request cap and the 5 USD cost stop are the distillation script's. When both files are measured, the paired bootstrap of v2 minus v1 is written next to them, and the README generator adds the rows below. The v2 team has not been scored yet.
 
-If `ORBIT_ANTHROPIC_API_KEY` is unset, `make score-v1` and `make score-v2` exit before any request and name that variable. Nothing is read from a file. `make score-dry-run` does not read a key.
+If `ORBIT_ANTHROPIC_API_KEY` and `ANTHROPIC_API_KEY` are both unset, `make score-v1` and `make score-v2` exit before any request and name `ORBIT_ANTHROPIC_API_KEY`. Nothing is read from a file. `make score-dry-run` does not read a key.
+
+## Round table
+
+The round table keeps the six seats and adds a coordinator, a researcher, a red team, and a verifier. It does not change the v1 or v2 prompts, the frozen test, or the archived scores. The researcher takes the first read. The red team's claim is checked in code and is not merged into the draft the auditor scores. The specialist turn limit is unchanged.
+
+Open Mission Control and choose a trace under Round table. Messages draw as links between seats. A refusal lights the ring and the page says why, in the words above.
+
+Offline, the scripted harness solves the tasks. That run is a system check, not a model score:
+
+```bash
+python -m orbit_agents.eval.run --team v3 --split test --out traces/v3_check.json
+make traces-v3
+```
+
+The model score is one API run. It is pending until this file exists and is measured:
+
+```bash
+make score-dry-run MODEL=claude-haiku-5-5
+export ANTHROPIC_API_KEY=your-key
+make score-v3 MODEL=claude-haiku-5-5
+```
+
+`make score-v3` also accepts `ORBIT_ANTHROPIC_API_KEY`. It writes `results/v3_api/<model>/team_v3.json` and refuses a file that is already measured. The generator then fills the round-table row. Until that file is measured, the Key results block says the round-table team is not scored, with no number filled in. Harness v3, the tool and gate change described in that block, is a different thing from this team. The model card is [docs/MODEL_CARD.md](docs/MODEL_CARD.md). The eval write-up is [docs/EVAL.md](docs/EVAL.md).
 
 ## Quickstart
 
@@ -191,7 +229,7 @@ make demo
 
 Future work, not a claim about a result:
 
-- Score the three-role team and the six-role team once on the same API model, with `make score-v1` and `make score-v2`, and let the generator add the paired interval.
+- Score the three-role team, the six-role team, and the round table once on the same API model, with `make score-v1`, `make score-v2`, and `make score-v3`, and let the generator add only the rows it can read from measured files.
 - Run the distill notebook once on a Colab T4, score team distill under harness v3, and commit only `results/v3_qwen1.5b/*.json` and `README.md`.
 - Keep the archived v2 numbers in `results/v2_qwen1.5b/` and do not compare them with a v3 score.
 - Train more than one seed before talking about a distribution. This page has one training run per config.
@@ -204,6 +242,7 @@ Future work, not a claim about a result:
 - The harness changed in v3. The v2 numbers are archived and are not compared with v3 runs. No v3 model score is in yet.
 - Team distill has not been scored. The notebook below is the path to that one score.
 - The v2 team (6 roles) has not been scored. Its traces in `mission/traces/v2/` come from the scripted harness, which follows each task's oracle; they show the protocol, not model skill.
+- The round-table team has not been scored. Its traces in `mission/traces/v3/` are the same kind of harness replay.
 - The free-T4 wall clock for training plus scoring has not been measured.
 
 ## Distillation
