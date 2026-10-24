@@ -1,0 +1,20 @@
+{
+  "status": "measured",
+  "kind": "comparison",
+  "n_resamples": 10000,
+  "seed": 0,
+  "pairs": {
+    "team_minus_single": {
+      "pass_at_1": {
+        "point": 0.0625,
+        "low": 0.0,
+        "high": 0.15625,
+        "n": 32,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    }
+  }
+}

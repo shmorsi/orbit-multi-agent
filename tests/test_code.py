@@ -148,11 +148,14 @@ def test_single_oracle_passes_and_tamper_is_not_a_pass(tmp_path):
     assert run_code_single(task, ScriptedCodePolicy(task, mode="repair"), tmp_path / "single").status == "refuse"
 
 
-def test_score_dry_run_prints_the_bound_and_writes_nothing():
+def test_score_dry_run_prints_the_bound_and_writes_nothing(tmp_path):
+    root = tmp_path / "repo"
+    shutil.copytree("data/scenarios/code_v2", root / "data/scenarios/code_v2")
     before = sorted(path.relative_to("results") for path in Path("results").rglob("*") if path.is_file())
-    plan = main(["--config", "team", "--model", "claude-haiku-5-5", "--dry-run"])
+    plan = main(["--config", "team", "--model", "claude-haiku-5-5", "--root", str(root), "--dry-run"])
     after = sorted(path.relative_to("results") for path in Path("results").rglob("*") if path.is_file())
     assert after == before
+    assert not (root / "results").exists()
     n_tasks = len(load_tasks(protocol=PROTOCOL_V2))
     assert plan["max_cost_usd"] == 5.0
     assert plan["frozen_test"]["protocol"] == PROTOCOL_V2
@@ -163,10 +166,11 @@ def test_score_dry_run_prints_the_bound_and_writes_nothing():
     assert plan["price_source"] == "table"
     assert plan["already_measured"] is False
     assert "read timeout" in plan["requests"]["note"]
-    single = main(["--config", "single", "--model", "claude-haiku-5-5", "--dry-run"])
+    single = main(["--config", "single", "--model", "claude-haiku-5-5", "--root", str(root), "--dry-run"])
     assert single["requests"] == request_bound(n_tasks, "single")
     assert single["max_cost_usd"] == 5.0
     assert single["out"] == "results/code_v2/claude-haiku-5-5/single.json"
+    assert single["already_measured"] is False
 
 
 def test_scorer_refuses_to_overwrite_a_measured_file(tmp_path):
