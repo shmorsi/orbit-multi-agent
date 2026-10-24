@@ -1,0 +1,1 @@
+nested_get walks path in a dict and returns default when a key is missing. The default is None when omitted. Do not edit tests.

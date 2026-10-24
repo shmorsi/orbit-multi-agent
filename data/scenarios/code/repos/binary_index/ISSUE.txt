@@ -1,0 +1,1 @@
+find must return the index of target in a sorted list, or -1 when it is absent.

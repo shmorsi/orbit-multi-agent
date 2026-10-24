@@ -1,0 +1,1 @@
+pop must remove and return the last item, not the first.

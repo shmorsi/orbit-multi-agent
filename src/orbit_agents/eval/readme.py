@@ -37,9 +37,12 @@ RUNS = (
     ("team_distill", "Team distill"),
 )
 V3_PAIRS = (
+    ("team_base_minus_single_base", "team base minus single base"),
+    ("team_lora_minus_single_base", "team plus adapter minus single base"),
+    ("team_lora_minus_team_base", "team plus adapter minus team base"),
+    ("team_distill_minus_single_base", "team distill minus single base"),
     ("team_distill_minus_team_base", "team distill minus team base"),
     ("team_distill_minus_team_lora", "team distill minus team plus adapter"),
-    ("team_lora_minus_team_base", "team plus adapter minus team base"),
 )
 PENDING_API = (
     ("team_v1", "Claude policy, three-role team, harness v3", "results/v3_api/<model>/team_v1.json"),
@@ -91,6 +94,15 @@ def _zero(interval: dict) -> str:
     if interval["high"] < 0:
         return "That interval is below zero."
     return "That interval includes zero."
+
+
+def _significance(interval: dict) -> str:
+    """Say whether a paired interval excludes zero. An interval on zero is not a difference."""
+    if interval["low"] > 0:
+        return "That interval excludes zero and is above zero."
+    if interval["high"] < 0:
+        return "That interval excludes zero and is below zero."
+    return "That interval includes zero, so the difference is not significant."
 
 
 def _table_head() -> list[str]:
@@ -167,18 +179,22 @@ def _v1(root: Path) -> str:
 def _v3(root: Path) -> list[str]:
     folder = root / "results" / "v3_qwen1.5b"
     runs = {key: _read(folder / f"{key}.json") for key, _label in RUNS}
-    intro = (
+    shared = (
         "The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count "
         "printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return "
-        "one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, "
-        "team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison."
+        "one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`."
     )
     if not any(_measured(payload) for payload in runs.values()):
-        return [intro + " Those v3 scores are not in yet."]
+        return [
+            shared + " single_base, team_base, team_lora, and team_distill must be scored again on the frozen test "
+            "under v3 before any comparison. Those v3 scores are not in yet."
+        ]
     lines = [
-        intro,
+        shared + " single_base, team_base, team_lora, and team_distill were scored again on the frozen test under v3. "
+        "Compare those four runs with each other. Do not compare them with the archived v2 numbers.",
         "",
-        "Harness v3, frozen test `team-eval-v1`, each run scored once. Files: `results/v3_qwen1.5b/`.",
+        "Harness v3, frozen test `team-eval-v1`, each run scored once. Files: `results/v3_qwen1.5b/`. "
+        "This table is not a comparison with the archived v2 numbers.",
         "",
         *_table_head(),
     ]
@@ -201,8 +217,8 @@ def _v3(root: Path) -> list[str]:
         success = pair["task_success_rate"]
         schema = pair["schema_valid_rate"]
         sentences.append(
-            f"The paired bootstrap for task success, {label}, is {_interval(success)}. {_zero(success)} "
-            f"Its schema-valid interval is {_interval(schema)}."
+            f"The paired bootstrap for task success, {label}, is {_interval(success)}. {_significance(success)} "
+            f"Its schema-valid interval is {_interval(schema)}. {_significance(schema)}"
         )
     lines.append(" ".join(sentences))
     return lines
@@ -293,16 +309,27 @@ def _pending(root: Path) -> list[str]:
             slots.append((label, path))
     if not slots:
         return ["", "No pending model slot. Every configured score file is measured."]
-    if seen["team_v1"] or seen["team_v2"]:
+    waiting = []
+    if not seen["team_v1"] or not seen["team_v2"]:
+        waiting.append("score-v1 and score-v2 on Claude")
+    if not seen["team_v3"]:
+        waiting.append("the round table")
+    if not _measured(_read(folder / "team_distill.json")):
+        waiting.append("the QLoRA distill run on a T4")
+    if any(not _measured(_read(folder / f"{key}.json")) for key in ("single_base", "team_base", "team_lora")):
+        waiting.append("the v3 rescores of the archived runs")
+    if not waiting:
+        intro = "Pending slots. A row here is not a result."
+    elif len(waiting) == 1:
         intro = (
-            "Pending slots. A row here is not a result. The round table and the QLoRA distill run on a T4 stay here "
-            "until a measured file exists. The v3 rescores of the archived runs stay here for the same reason."
+            "Pending slots. A row here is not a result. "
+            f"{waiting[0][:1].upper()}{waiting[0][1:]} stays here until a measured file exists."
         )
     else:
+        listed = ", ".join(waiting[:-1]) + ", and " + waiting[-1]
         intro = (
-            "Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, the round table, and the "
-            "QLoRA distill run on a T4, stay here until a measured file exists. The v3 rescores of the archived runs "
-            "stay here for the same reason."
+            "Pending slots. A row here is not a result. "
+            f"{listed[:1].upper()}{listed[1:]} stay here until a measured file exists."
         )
     lines = [
         "",
@@ -315,6 +342,90 @@ def _pending(root: Path) -> list[str]:
     return lines
 
 
+CODE_CONFIGS = (
+    ("single", "Single agent"),
+    ("team", "Team with reviewer"),
+)
+
+_V1_SUPERSEDED = (
+    "The earlier split `code-eval-v1` was scored and is superseded. "
+    "The team pipeline refused a task when the planner reply failed the schema, "
+    "and a critic accept stopped a red build before the coder could revise. "
+    "Those files stay at `results/code/claude-haiku-5-5/` as the record of that run. "
+    "They are not the current score."
+)
+
+
+def _measured_code(payload: dict | None) -> bool:
+    return _measured(payload) and payload.get("protocol") == "code-eval-v2"
+
+
+def _code_cells(payload: dict) -> tuple[str, str]:
+    usage = payload.get("usage") or {}
+    tokens = ""
+    if isinstance(usage.get("input_tokens"), int) and isinstance(usage.get("output_tokens"), int):
+        tokens = f"{display_number(usage['input_tokens'])} in, {display_number(usage['output_tokens'])} out"
+    cost = usage.get("estimated_cost_usd")
+    cost_cell = ""
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+        cost_cell = display_number(cost)
+    return tokens, cost_cell
+
+
+def _code(root: Path) -> list[str]:
+    """Orbit Code rows for code-eval-v2. Pending slots have no number.
+
+    The code-eval-v1 files under results/code/ are a superseded record. This block
+    does not copy their pass rates.
+    """
+    lines = [
+        "Orbit Code, frozen split `code-eval-v2`. A row is filled only from a measured file under `results/code_v2/`. "
+        "Anything else is pending, not scored.",
+        "",
+        "| Config | Model | pass@1 | Tests-passed rate | Reviewer rejections | Tokens | Cost USD |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    folder = root / "results" / "code_v2"
+    measured: list[dict] = []
+    if folder.is_dir():
+        for model_dir in sorted(path for path in folder.iterdir() if path.is_dir()):
+            for key, _label in CODE_CONFIGS:
+                payload = _read(model_dir / f"{key}.json")
+                if _measured_code(payload):
+                    measured.append(payload)
+    if not measured:
+        lines.extend(
+            [
+                "| Single agent | pending | pending, not scored | | | | |",
+                "| Team with reviewer | pending | pending, not scored | | | | |",
+                "| Single agent, local Qwen | pending | pending, not scored | | | | |",
+            ]
+        )
+        lines.extend(["", _V1_SUPERSEDED])
+        return lines
+    for payload in measured:
+        tokens, cost = _code_cells(payload)
+        lines.append(
+            f"| {payload.get('config_label', payload['config'])} | `{payload['model']}` | "
+            f"{display_number(payload['pass_at_1'])} | {display_number(payload['tests_passed_rate'])} | "
+            f"{display_number(payload['n_reviewer_rejections'])} of {display_number(payload['n_tasks'])} | "
+            f"{tokens} | {cost} |"
+        )
+    have_single = any(item.get("config") == "single" and item.get("provider") != "transformers" for item in measured)
+    have_team = any(item.get("config") == "team" for item in measured)
+    have_qwen = any(
+        item.get("provider") == "transformers" or "qwen" in str(item.get("model", "")).lower() for item in measured
+    )
+    if not have_single:
+        lines.append("| Single agent | pending | pending, not scored | | | | |")
+    if not have_team:
+        lines.append("| Team with reviewer | pending | pending, not scored | | | | |")
+    if not have_qwen:
+        lines.append("| Single agent, local Qwen | pending | pending, not scored | | | | |")
+    lines.extend(["", _V1_SUPERSEDED])
+    return lines
+
+
 def render(root: Path = ROOT) -> str:
     """Render the Key results block from the committed result files."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
@@ -324,6 +435,8 @@ def render(root: Path = ROOT) -> str:
             "Rates, losses, and intervals below are the committed values, shown to three decimal places. "
             "The JSON files hold the full values."
         ),
+        "",
+        *_code(root),
         "",
         *_v2(root, distill),
         "",

@@ -1,0 +1,1 @@
+slug(parts) joins the parts with single spaces, then lowercases the text and turns spaces into hyphens. Do not edit tests.

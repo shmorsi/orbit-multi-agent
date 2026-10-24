@@ -1,0 +1,1 @@
+tally counts each key, and a repeated key increments the same entry. Do not edit tests.

@@ -1,0 +1,22 @@
+{
+  "corpus": "corpus",
+  "fictional": true,
+  "files": {
+    "financials.csv": {
+      "sha256": "116df72017e8ad940c3b094e6a63ac435a606a41ea5aaad45f5e11605228e2d4",
+      "bytes": 123
+    },
+    "market_notes.md": {
+      "sha256": "b411c6e90e03b88f5e5d4beeaa3b8ba953123644f2d5331ccf232248d6a72d39",
+      "bytes": 173
+    },
+    "memos/launch.md": {
+      "sha256": "bf4655d0fa325ee73dcb1ac4a94a1ef7a986aaee7cd3f8eb9077c6eb8805b442",
+      "bytes": 120
+    },
+    "product_metrics.csv": {
+      "sha256": "23731d58e11defa5b9b04db319e13dad3b08da2bfc0354efa0bd31b50f1104dc",
+      "bytes": 73
+    }
+  }
+}

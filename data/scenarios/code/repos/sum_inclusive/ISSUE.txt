@@ -1,0 +1,1 @@
+sum_to(n) must add every integer from 1 through n, including n.

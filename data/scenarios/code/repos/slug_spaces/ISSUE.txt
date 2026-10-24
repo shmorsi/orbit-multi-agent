@@ -1,0 +1,1 @@
+slugify must lowercase the text and join words with a single hyphen.

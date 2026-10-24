@@ -43,6 +43,22 @@ const V3_ROLES = [
   ["auditor", "Auditor", "Gate"],
 ];
 
+const CODE_ROLES = [
+  ["planner", "Planner", "Plan"],
+  ["coder", "Coder", "Edit"],
+  ["test_runner", "Tests", "Run"],
+  ["critic", "Critic", "Check"],
+  ["reviewer", "Reviewer", "Ship"],
+];
+
+const BOARD_ROLES = [
+  ["ceo", "CEO", "Frame"],
+  ["cfo", "CFO", "Finance"],
+  ["cto", "CTO", "Product"],
+  ["coo", "COO", "Ops"],
+  ["auditor", "Auditor", "Gate"],
+];
+
 const ROLE_LINES = {
   planner: "Writes the plan. Does not call tools.",
   worker: "Calls a tool, or drafts the answer.",
@@ -56,6 +72,13 @@ const ROLE_LINES = {
   researcher: "Reads the corpus. Cannot run code or answer.",
   redteam: "Proposes one claim the tools do not support.",
   verifier: "The code gate re-checks that claim.",
+  coder: "Edits source in a temp workspace. Tests are off limits.",
+  test_runner: "Runs pytest with a timeout and no network.",
+  reviewer: "Rejects a patch whose tests fail or whose diff touches the tests.",
+  ceo: "Frames the decision. Does not invent a figure.",
+  cfo: "Cites the financials. A figure the file does not contain is refused.",
+  cto: "Cites the product metrics.",
+  coo: "Cites the launch memo.",
 };
 
 const PHASE_LABELS = {
@@ -74,12 +97,26 @@ const PHASE_LABELS = {
     critic: "04 Verifier",
     auditor: "05 Auditor",
   },
+  code: {
+    planner: "01 Planner",
+    worker: "02 Coder",
+    tool: "03 Tests",
+    critic: "04 Critic",
+    auditor: "05 Reviewer",
+  },
+  boardroom: {
+    planner: "01 CEO",
+    worker: "02 Officers",
+    tool: "03 Files",
+    critic: "04 Check",
+    auditor: "05 Auditor",
+  },
 };
 
 function teamOf(mission, events) {
   const rules = (mission && mission.flight_rules) || {};
   const named = (mission && mission.team) || rules.team;
-  if (named === "v3" || named === "v2" || named === "v1") return named;
+  if (named === "code" || named === "boardroom" || named === "v3" || named === "v2" || named === "v1") return named;
   if (events.some((event) => event.agent === "coordinator" || event.agent === "redteam" || event.agent === "verifier")) return "v3";
   return events.some((event) => event.kind === "assign" || event.kind === "audit") ? "v2" : "v1";
 }
@@ -95,7 +132,7 @@ function setPhases(next) {
 
 function clearRoundTable() {
   const stage = document.getElementById("stage");
-  stage.querySelectorAll(".seat.v2, .seat.v3").forEach((node) => node.remove());
+  stage.querySelectorAll(".seat.v2, .seat.v3, .seat.code, .seat.boardroom").forEach((node) => node.remove());
   const links = document.getElementById("links");
   if (links) links.remove();
 }
@@ -128,8 +165,18 @@ function setTeam(next) {
   const stage = document.getElementById("stage");
   clearRoundTable();
   for (const seat of Object.values(V1_SEATS)) seat.hidden = next !== "v1";
+  const work = document.getElementById("codework");
+  if (work) work.hidden = next !== "code" && next !== "boardroom";
+  const lanes = document.getElementById("lanes");
+  if (lanes) lanes.hidden = next !== "code" && next !== "boardroom";
   if (next === "v1") {
     seats = V1_SEATS;
+    return;
+  }
+  if (next === "code" || next === "boardroom") {
+    const narrow = stage.clientWidth < 460;
+    const reach = narrow ? 34 : 38;
+    seats = placeSeats(next === "code" ? CODE_ROLES : BOARD_ROLES, next, reach);
     return;
   }
   const narrow = stage.clientWidth < 460;
@@ -173,15 +220,26 @@ function applyHarness(mission, backend) {
   const scripted = isScripted(mission, backend);
   document.getElementById("harness").hidden = !scripted;
   document.getElementById("title-harness").hidden = !scripted;
+  const names = { code: "Orbit Code", boardroom: "Orbit Boardroom", incident: "Incident commander" };
+  const scenarioName = mission && names[mission.scenario];
+  document.body.dataset.scenario = scenarioName ? mission.scenario : "";
   const scenario = document.getElementById("scenario");
-  const incident = Boolean(mission && mission.scenario === "incident");
-  document.body.dataset.scenario = incident ? "incident" : "";
   if (scenario) {
-    scenario.hidden = !incident;
-    scenario.textContent = incident ? "Incident commander" : "";
+    scenario.hidden = !scenarioName;
+    scenario.textContent = scenarioName || "";
+  }
+  document.querySelectorAll(".scenarios button").forEach((button) => {
+    const on = Boolean(mission && button.dataset.scenario === mission.scenario);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    button.classList.toggle("on", on);
+  });
+  const note = document.getElementById("scenario-note");
+  if (note) {
+    note.hidden = !(mission && mission.scenario_note);
+    note.textContent = mission && mission.scenario_note ? mission.scenario_note : "";
   }
   const kicker = document.querySelector("#titlecard .kicker");
-  if (kicker) kicker.textContent = incident ? "Incident commander" : "Orbit";
+  if (kicker) kicker.textContent = scenarioName || "Orbit";
 }
 
 let titleTimer = null;
@@ -226,6 +284,9 @@ function summarize(event) {
   if (payload && payload.verdict) return `${payload.verdict}: ${payload.reason || ""}`.trim();
   if (payload && payload.why && payload.claim) return payload.why;
   if (event.kind === "result") return `${event.tool} ${event.call}`;
+  if (event.kind === "edit") return "Edit";
+  if (event.kind === "test") return event.ok ? "Tests passed" : "Tests failed";
+  if (event.kind === "review") return `${event.verdict}: ${event.reason || ""}`.trim();
   if (event.kind === "revise") return event.reason || "Revise";
   if (event.kind === "invalid") return event.error || "Invalid";
   if (typeof event.content === "string") return event.content.replace(/\s+/g, " ").slice(0, 140);
@@ -250,6 +311,26 @@ function routeV2(event) {
 }
 
 function route(event) {
+  if (team === "code") {
+    if (event.agent === "planner") return "Planner → Coder";
+    if (event.kind === "edit") return "Coder → Test runner";
+    if (event.kind === "test") return event.ok ? "Tests pass" : "Tests fail";
+    if (event.kind === "review") return event.verdict === "reject" ? "Reviewer rejects" : "Reviewer accepts";
+    if (event.kind === "revise") return "Critic → Coder";
+    if (event.agent === "critic") return "Critic → Reviewer";
+    if (event.kind === "gate") return "Grounding gate";
+    if (event.kind === "final") return "Reviewer → Trace";
+    return event.agent || "Bus";
+  }
+  if (team === "boardroom") {
+    if (event.agent === "ceo") return "CEO · frame";
+    if (event.agent === "cfo") return "CFO → Auditor";
+    if (event.agent === "cto") return "CTO → Auditor";
+    if (event.agent === "coo") return "COO → Auditor";
+    if (event.kind === "audit" || event.kind === "gate") return event.verdict === "refuse" || event.code_verdict === "refuse" ? "Auditor refuses" : "Auditor · check";
+    if (event.kind === "final") return "Auditor → Memo";
+    return event.agent || "Bus";
+  }
   if (team === "v3") {
     if (event.kind === "gate") return "Red team → Verifier";
     if (event.agent === "coordinator") return "Coordinator · open";
@@ -273,7 +354,15 @@ function renderRules(rules) {
   const root = document.getElementById("rules");
   root.replaceChildren();
   if (!rules) return;
-  const roster = rules.team === "v3" ? V3_ROLES : rules.team === "v2" ? V2_ROLES : null;
+  const roster = rules.team === "code"
+    ? CODE_ROLES
+    : rules.team === "boardroom"
+      ? BOARD_ROLES
+      : rules.team === "v3"
+        ? V3_ROLES
+        : rules.team === "v2"
+          ? V2_ROLES
+          : null;
   const tools = (key) => {
     const list = (rules.permissions && rules.permissions[key]) || [];
     return list.length ? ` Tools: ${list.join(", ")}.` : "";
@@ -339,6 +428,20 @@ function pulse(fromName, toName) {
 
 function phaseOf(event) {
   if (!event) return null;
+  if (team === "code") {
+    if (event.kind === "review" || event.kind === "gate" || event.kind === "final" || event.agent === "reviewer") return "auditor";
+    if (event.agent === "critic" || event.kind === "revise") return "critic";
+    if (event.kind === "test" || event.agent === "test_runner") return "tool";
+    if (event.kind === "edit" || event.agent === "coder") return "worker";
+    if (event.agent === "planner") return "planner";
+    return null;
+  }
+  if (team === "boardroom") {
+    if (event.agent === "auditor" || event.kind === "audit" || event.kind === "gate" || event.kind === "final") return "auditor";
+    if (event.agent === "ceo") return "planner";
+    if (event.agent === "cfo" || event.agent === "cto" || event.agent === "coo") return "worker";
+    return null;
+  }
   if (team === "v3") {
     if (event.agent === "auditor" || event.kind === "audit" || event.kind === "final") return "auditor";
     if (event.kind === "gate" || event.agent === "verifier" || event.agent === "redteam") return "critic";
@@ -364,6 +467,9 @@ function phaseOf(event) {
 
 function telemetryText(event) {
   if (!event) return "Awaiting uplink";
+  if (event.kind === "edit") return `EDIT\n${String(event.diff || "").slice(0, 360)}`;
+  if (event.kind === "test") return `${event.ok ? "PASS" : "FAIL"}  ${event.summary || ""}`;
+  if (event.kind === "review") return `REVIEW  ${event.verdict}\n${event.reason || ""}`;
   if (event.kind === "gate") return `GATE  ${event.code_verdict}\n${event.reason || ""}`;
   if (event.kind === "audit") {
     const lines = (event.findings || []).map(finding);
@@ -390,7 +496,7 @@ function telemetryText(event) {
   }
   if (event.payload && Array.isArray(event.payload.steps)) {
     if (!event.payload.steps.length) return "PLAN  empty\nThe corpus cannot answer.";
-    return event.payload.steps.map((step, index) => `${index + 1}. ${step.tool}  ${step.goal}`).join("\n");
+    return event.payload.steps.map((step, index) => `${index + 1}. ${step.tool ? `${step.tool}  ` : ""}${step.goal}`).join("\n");
   }
   if (event.kind === "revise") return `REVISE\n${event.reason || ""}`;
   if (event.kind === "invalid") return `INVALID\n${event.error || ""}`;
@@ -424,8 +530,33 @@ function focusAgentV2(event) {
   if (event.kind === "audit" && auditor) auditor.dataset.verdict = event.verdict;
 }
 
+function focusCode(event) {
+  const name = event.agent;
+  if (seats[name]) seats[name].classList.add("lit");
+  if (event.agent === "planner") pulse("planner", "coder");
+  else if (event.kind === "edit") pulse("coder", "test_runner");
+  else if (event.kind === "test") pulse("test_runner", "reviewer");
+  else if (event.kind === "review" && event.verdict === "reject") pulse("reviewer", "critic");
+  else if (event.kind === "review") pulse("critic", "reviewer");
+  else if (event.kind === "revise") pulse("critic", "coder");
+  else if (event.agent === "critic") pulse("critic", "reviewer");
+  else if (event.agent === "ceo") pulse("ceo", "cfo");
+  else if (event.agent === "cfo") pulse("cfo", "cto");
+  else if (event.agent === "cto") pulse("cto", "coo");
+  else if (event.agent === "coo") pulse("coo", "auditor");
+  else if (event.kind === "audit" || event.kind === "gate") {
+    if (seats.auditor) seats.auditor.dataset.verdict = event.verdict || event.code_verdict;
+  }
+  const reviewer = seats.reviewer;
+  if (reviewer && event.kind === "review") reviewer.dataset.verdict = event.verdict === "reject" ? "refuse" : "pass";
+}
+
 function focusAgent(event) {
   for (const seat of Object.values(seats)) seat.classList.remove("lit");
+  if (team === "code" || team === "boardroom") {
+    focusCode(event);
+    return;
+  }
   if (team === "v2" || team === "v3") {
     focusAgentV2(event);
     return;
@@ -467,7 +598,127 @@ function drawLinks(shown) {
   }
 }
 
+function paintDiff(text) {
+  const pre = document.getElementById("diffview");
+  if (!pre) return;
+  pre.replaceChildren();
+  const source = text || "";
+  if (!source.trim()) {
+    pre.hidden = true;
+    return;
+  }
+  pre.hidden = false;
+  const keywords = /^(def|return|if|else|for|in|class|None|True|False|import|not|and|or)$/;
+  for (const line of source.split("\n")) {
+    const row = document.createElement("div");
+    let body = line;
+    const marker = (line.startsWith("+") || line.startsWith("-")) && !line.startsWith("+++") && !line.startsWith("---");
+    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) row.className = "meta";
+    else if (line.startsWith("+")) row.className = "add";
+    else if (line.startsWith("-")) row.className = "del";
+    if (marker) {
+      body = line.slice(1);
+      row.append(line.slice(0, 1));
+    }
+    const parts = body.split(/(\b(?:def|return|if|else|for|in|class|None|True|False|import|not|and|or)\b|"[^"]*"|'[^']*')/g);
+    for (const part of parts) {
+      if (!part) continue;
+      const span = document.createElement("span");
+      if (keywords.test(part)) span.className = "kw";
+      else if (part.startsWith('"') || part.startsWith("'")) span.className = "str";
+      span.textContent = part;
+      row.append(span);
+    }
+    if (!line) row.textContent = " ";
+    pre.append(row);
+  }
+}
+
+function paintLanes(shown) {
+  const root = document.getElementById("lanes");
+  if (!root) return;
+  const roles = team === "code" ? CODE_ROLES : team === "boardroom" ? BOARD_ROLES : [];
+  root.replaceChildren();
+  if (!roles.length) return;
+  for (const [key, label] of roles) {
+    const row = document.createElement("div");
+    row.className = "lane";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const ticks = document.createElement("div");
+    ticks.className = "ticks";
+    for (const event of shown) {
+      const mark = document.createElement("i");
+      const hit = event.agent === key || (key === "reviewer" && event.kind === "review") || (key === "auditor" && (event.kind === "audit" || event.kind === "gate"));
+      if (hit) {
+        const bad = event.verdict === "reject" || event.verdict === "refuse" || event.code_verdict === "refuse" || event.ok === false;
+        const good = event.verdict === "accept" || event.verdict === "pass" || event.code_verdict === "pass" || event.ok === true;
+        mark.className = bad ? "on bad" : good ? "on good" : "on";
+      }
+      ticks.append(mark);
+    }
+    row.append(name, ticks);
+    root.append(row);
+  }
+}
+
+function paintTests(shown) {
+  const lamp = document.getElementById("testlamp");
+  if (!lamp) return;
+  const event = [...shown].reverse().find((item) => item.kind === "test");
+  if (!event || team !== "code") {
+    lamp.hidden = true;
+    return;
+  }
+  lamp.hidden = false;
+  lamp.className = "testlamp " + (event.ok ? "pass" : "fail");
+  lamp.textContent = event.ok ? "Tests passed" : "Tests failed";
+}
+
+function paintWork(shown) {
+  paintLanes(shown);
+  paintTests(shown);
+  if (team === "code") {
+    const edit = [...shown].reverse().find((item) => item.kind === "edit");
+    paintDiff(edit ? edit.diff : "");
+    return;
+  }
+  if (team === "boardroom") {
+    const audit = [...shown].reverse().find((item) => item.kind === "audit");
+    if (!audit) {
+      paintDiff("");
+      return;
+    }
+    const lines = (audit.findings || []).map((finding) => {
+      const mark = finding.ok ? "keep" : "refuse";
+      return `${mark}  ${finding.claim}  ${finding.source || ""}`;
+    });
+    paintDiff(lines.join("\n"));
+    const pre = document.getElementById("diffview");
+    if (pre) {
+      [...pre.children].forEach((row) => {
+        if (row.textContent.startsWith("refuse")) row.classList.add("del");
+        if (row.textContent.startsWith("keep")) row.classList.add("add");
+      });
+    }
+  }
+}
+
 function refusalText(shown, mission) {
+  const scenario = mission && mission.scenario;
+  if (scenario === "code") {
+    const review = [...shown].reverse().find((event) => event.kind === "review");
+    if (review && review.verdict === "reject") return review.reason || "The reviewer rejected the patch.";
+    const gate = [...shown].reverse().find((event) => event.kind === "gate" && event.code_verdict === "refuse");
+    return gate ? gate.reason || "" : "";
+  }
+  if (scenario === "boardroom") {
+    const audit = [...shown].reverse().find((event) => event.kind === "audit" && event.verdict === "refuse");
+    if (!audit) return "";
+    const missed = (audit.findings || []).filter((item) => !item.ok).map((item) => item.claim).filter(Boolean);
+    const names = missed.length ? missed.join(", ") : "a claim";
+    return `The auditor refused ${names}. The cited file does not support that figure.`;
+  }
   const bits = [];
   const gate = [...shown].reverse().find((event) => event.kind === "gate" && event.code_verdict === "refuse");
   if (gate) {
@@ -515,15 +766,21 @@ function render() {
     detail.className = "detail";
     detail.textContent = summarize(event);
     body.append(routeLine, detail);
+    if ((event.kind === "review" && event.verdict === "reject") || (event.kind === "audit" && event.verdict === "refuse") || (event.kind === "gate" && event.code_verdict === "refuse")) {
+      item.classList.add("reject");
+    }
+    if (event.kind === "test") item.classList.add(event.ok ? "pass" : "fail");
     item.append(time, body);
     log.append(item);
   }
+  paintWork(shown);
   const last = shown[shown.length - 1];
   paintPhase(shown);
   if (team === "v3") drawLinks(shown);
   const stage = document.getElementById("stage");
   let verdict = null;
   for (const event of shown) {
+    if (event.kind === "review") verdict = event.verdict === "reject" ? "refuse" : "pass";
     if (event.kind === "gate") verdict = event.code_verdict;
     if (event.kind === "audit") verdict = event.verdict;
   }
@@ -716,7 +973,45 @@ async function loadIndex() {
     setNotice("");
   }
   const requested = params.get("trace");
-  const featured = "incident/report.jsonl";
+  try {
+    const codeResponse = await fetch("traces/code/index.json");
+    if (codeResponse.ok) {
+      const codeIndex = await codeResponse.json();
+      const codeGroup = document.createElement("optgroup");
+      codeGroup.label = "Orbit Code";
+      for (const item of codeIndex) {
+        const option = document.createElement("option");
+        option.value = `code/${item.file}`;
+        option.textContent = `${item.task_id} · ${item.outcome || item.status}`;
+        codeGroup.append(option);
+        index.push({ file: option.value });
+      }
+      select.prepend(codeGroup);
+    }
+  } catch (error) {
+    setNotice("");
+  }
+  try {
+    const boardResponse = await fetch("traces/boardroom/index.json");
+    if (boardResponse.ok) {
+      const boardIndex = await boardResponse.json();
+      const boardGroup = document.createElement("optgroup");
+      boardGroup.label = "Orbit Boardroom";
+      for (const item of boardIndex) {
+        const option = document.createElement("option");
+        option.value = `boardroom/${item.file}`;
+        option.textContent = `${item.task_id} · ${item.status}`;
+        boardGroup.append(option);
+        index.push({ file: option.value });
+      }
+      const codeGroup = select.querySelector("optgroup");
+      if (codeGroup) codeGroup.after(boardGroup);
+      else select.prepend(boardGroup);
+    }
+  } catch (error) {
+    setNotice("");
+  }
+  const featured = "code/repair.jsonl";
   const choice = index.some((item) => item.file === requested)
     ? requested
     : index.some((item) => item.file === featured)
@@ -808,6 +1103,24 @@ document.getElementById("scrub").addEventListener("input", (event) => {
   hideTitle();
   state.cursor = Number(event.target.value);
   render();
+});
+const SCENARIO_TRACE = {
+  code: "code/repair.jsonl",
+  boardroom: "boardroom/memo.jsonl",
+  incident: "incident/report.jsonl",
+};
+
+document.querySelectorAll(".scenarios button").forEach((button) => {
+  button.addEventListener("click", () => {
+    const preferred = SCENARIO_TRACE[button.dataset.scenario];
+    const prefix = `${button.dataset.scenario}/`;
+    const options = [...document.getElementById("trace").options];
+    const option = options.find((item) => item.value === preferred) || options.find((item) => item.value.startsWith(prefix));
+    if (!option) return;
+    document.getElementById("trace").value = option.value;
+    params.delete("autoplay");
+    loadTrace(option.value).catch((error) => setNotice(error.message));
+  });
 });
 document.getElementById("trace").addEventListener("change", (event) => {
   if (event.target.value === "live") return;

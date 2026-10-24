@@ -1,0 +1,1 @@
+strip_zeros drops leading zeros and keeps a single zero when the text is all zeros. Do not edit tests.

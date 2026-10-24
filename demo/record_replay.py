@@ -158,14 +158,27 @@ def _evaluate(cdp: SocketCDP, expression: str):
     return result.get("result", {}).get("value")
 
 
-def record(trace_name: str, also_artifacts: Path | None) -> None:
+def record(
+    trace_name: str,
+    also_artifacts: Path | None,
+    *,
+    mp4_name: str = "mission-control.mp4",
+    gif_name: str = "mission-control.gif",
+    step_ms: int = 2200,
+    title_ms: int = 4000,
+    hold_s: float = 8,
+    loose: bool = False,
+    width: int = 1280,
+    height: int = 800,
+    gif_scale: int = 800,
+    gif_fps: int = 8,
+    capture_every: float = 0.5,
+    device_scale: int = 1,
+) -> None:
     trace = ROOT / "mission" / "traces" / trace_name
     events = _event_count(trace)
-    step_ms = 2200
-    title_ms = 4000
-    hold_s = 8
     duration = title_ms / 1000 + (max(events - 1, 1) * step_ms / 1000) + hold_s
-    if not 30 <= duration <= 60:
+    if not loose and not 30 <= duration <= 60:
         raise SystemExit(f"recording length {duration:.1f}s is outside 30-60s")
     server = bind(0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -191,7 +204,7 @@ def record(trace_name: str, also_artifacts: Path | None) -> None:
             "--remote-allow-origins=*",
             f"--remote-debugging-port={debug}",
             f"--user-data-dir={profile}",
-            "--window-size=1280,800",
+            f"--window-size={width},{height}",
             "about:blank",
         ],
         stdout=chrome_log.open("w"),
@@ -227,7 +240,7 @@ def record(trace_name: str, also_artifacts: Path | None) -> None:
         page_cdp.call("Runtime.enable")
         page_cdp.call(
             "Emulation.setDeviceMetricsOverride",
-            {"width": 1280, "height": 800, "deviceScaleFactor": 1, "mobile": False},
+            {"width": width, "height": height, "deviceScaleFactor": device_scale, "mobile": False},
         )
         deadline = time.monotonic() + 15
         ready = ""
@@ -245,7 +258,7 @@ def record(trace_name: str, also_artifacts: Path | None) -> None:
             index += 1
             (frames / f"frame_{index:04d}.png").write_bytes(base64.b64decode(shot["data"]))
             elapsed = time.monotonic() - started
-            sleep_for = (index * 0.5) - elapsed
+            sleep_for = (index * capture_every) - elapsed
             if sleep_for > 0:
                 time.sleep(sleep_for)
         badge = _evaluate(page_cdp, "document.getElementById('badge').textContent")
@@ -265,14 +278,16 @@ def record(trace_name: str, also_artifacts: Path | None) -> None:
         raise SystemExit("recorder captured fewer than two frames")
     docs = ROOT / "docs"
     docs.mkdir(parents=True, exist_ok=True)
-    mp4 = docs / "mission-control.mp4"
-    gif = docs / "mission-control.gif"
+    mp4 = docs / mp4_name
+    gif = docs / gif_name
+    rate = 1 / capture_every
+    rate_arg = str(int(rate)) if rate == int(rate) else f"{rate:.4f}"
     subprocess.check_call(
         [
             "ffmpeg",
             "-y",
             "-framerate",
-            "2",
+            rate_arg,
             "-i",
             str(frames / "frame_%04d.png"),
             "-c:v",
@@ -292,7 +307,7 @@ def record(trace_name: str, also_artifacts: Path | None) -> None:
             "-i",
             str(mp4),
             "-vf",
-            "fps=8,scale=800:-1:flags=lanczos,palettegen",
+            f"fps={gif_fps},scale={gif_scale}:-1:flags=lanczos,palettegen",
             str(palette),
         ]
     )
@@ -305,7 +320,7 @@ def record(trace_name: str, also_artifacts: Path | None) -> None:
             "-i",
             str(palette),
             "-lavfi",
-            "fps=8,scale=800:-1:flags=lanczos[x];[x][1:v]paletteuse",
+            f"fps={gif_fps},scale={gif_scale}:-1:flags=lanczos[x];[x][1:v]paletteuse",
             str(gif),
         ]
     )
@@ -323,7 +338,7 @@ def record(trace_name: str, also_artifacts: Path | None) -> None:
         text=True,
     ).strip()
     length = float(probed)
-    if not 30 <= length <= 60:
+    if not loose and not 30 <= length <= 60:
         raise SystemExit(f"mp4 duration {length:.2f}s is outside 30-60s")
     first = (frames / "frame_0001.png").read_bytes()
     last = (frames / f"frame_{index:04d}.png").read_bytes()
@@ -339,8 +354,35 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Record the Mission Control replay")
     parser.add_argument("--trace", default="revise.jsonl")
     parser.add_argument("--artifacts", type=Path, default=Path("/opt/cursor/artifacts/mission-control.mp4"))
+    parser.add_argument("--mp4", default="mission-control.mp4")
+    parser.add_argument("--gif", default="mission-control.gif")
+    parser.add_argument("--step-ms", type=int, default=2200)
+    parser.add_argument("--title-ms", type=int, default=4000)
+    parser.add_argument("--hold", type=float, default=8)
+    parser.add_argument("--loose", action="store_true")
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=800)
+    parser.add_argument("--gif-scale", type=int, default=800)
+    parser.add_argument("--gif-fps", type=int, default=8)
+    parser.add_argument("--capture-every", type=float, default=0.5)
+    parser.add_argument("--device-scale", type=int, default=1)
     args = parser.parse_args()
-    record(args.trace, args.artifacts)
+    record(
+        args.trace,
+        args.artifacts,
+        mp4_name=args.mp4,
+        gif_name=args.gif,
+        step_ms=args.step_ms,
+        title_ms=args.title_ms,
+        hold_s=args.hold,
+        loose=args.loose,
+        width=args.width,
+        height=args.height,
+        gif_scale=args.gif_scale,
+        gif_fps=args.gif_fps,
+        capture_every=args.capture_every,
+        device_scale=args.device_scale,
+    )
 
 
 if __name__ == "__main__":

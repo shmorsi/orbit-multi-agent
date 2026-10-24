@@ -1,0 +1,1 @@
+overlaps must treat closed intervals as overlapping when they share an endpoint.

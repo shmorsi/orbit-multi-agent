@@ -1,0 +1,179 @@
+{
+  "kind": "model_eval",
+  "split": "test",
+  "protocol": "code-eval-v1",
+  "split_tag": "code-eval-v1",
+  "bundle_sha256": "18665421458c6661299b60c1aa982394c9d3b773660a16bb3d7066f090a7028f",
+  "config": "single",
+  "config_label": "Single agent",
+  "provider": "anthropic",
+  "model": "claude-haiku-5-5",
+  "adapter": null,
+  "max_requests": 196,
+  "max_cost_usd": 5.0,
+  "usage": {
+    "requests": 17,
+    "max_requests": 196,
+    "input_tokens": 3101,
+    "output_tokens": 2163,
+    "estimated_cost_usd": 0.0013915999999999998,
+    "price_source": "table",
+    "status_counts": {
+      "200": 17
+    }
+  },
+  "status": "measured",
+  "n_tasks": 16,
+  "n_pass": 16,
+  "pass_at_1": 1.0,
+  "tests_passed_rate": 1.0,
+  "n_reviewer_rejections": 0,
+  "reviewer_rejection_rate": 0.0,
+  "per_task": [
+    {
+      "id": "sum-inclusive",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "palindrome-fold",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "mean-empty",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "tax-half-up",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "csv-keep-tail",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "stack-pop",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "parse-mdy",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "binary-index",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "discount-once",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "slug-spaces",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "counter-add",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "interval-touch",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "median-even",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "backoff-pow",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "clamp-ends",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    },
+    {
+      "id": "stable-unique",
+      "pass": true,
+      "hidden_passed_rate": 1.0,
+      "n_hidden_passed": 1,
+      "n_hidden": 1,
+      "reviewer_rejected": false,
+      "status": "answer"
+    }
+  ],
+  "note": "One score on the frozen code split. The policy saw the issue and the source files, not the hidden tests."
+}

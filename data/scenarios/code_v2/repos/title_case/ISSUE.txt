@@ -1,0 +1,1 @@
+title_case capitalizes each word except a, of, the, and and, which stay lower unless they are first. Do not edit tests.

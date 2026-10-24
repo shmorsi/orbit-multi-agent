@@ -23,6 +23,7 @@
     <section class="stage-wrap">
       <p class="eyebrow">Task</p>
       <p id="question" class="question">Loading a saved engine trace.</p>
+      <p id="scenario-note" class="scenario-note" hidden></p>
       <p id="crew" class="crew"></p>
       <ol class="phases" id="phases">
         <li data-phase="planner">01 Planner</li>
@@ -31,6 +32,7 @@
         <li data-phase="critic">04 Critic</li>
         <li data-phase="auditor" hidden>05 Auditor</li>
       </ol>
+      <div id="lanes" class="lanes" hidden></div>
       <div class="stage" id="stage">
         <div class="orbit" aria-hidden="true"><i></i><i></i></div>
         <div class="ring"><span id="mark">Orbit</span></div>
@@ -65,6 +67,11 @@
             <option value="4">4×</option>
           </select>
         </label>
+        <div class="scenarios" role="tablist" aria-label="Scenario">
+          <button type="button" id="scenario-code" data-scenario="code" aria-pressed="false">Code</button>
+          <button type="button" id="scenario-boardroom" data-scenario="boardroom" aria-pressed="false">Boardroom</button>
+          <button type="button" id="scenario-incident" data-scenario="incident" aria-pressed="false">Incident</button>
+        </div>
         <label class="speed">Trace
           <select id="trace" aria-label="Saved trace"></select>
         </label>
@@ -95,6 +102,11 @@
       </form>
     </section>
     <aside class="side">
+      <div id="codework" class="codework" hidden>
+        <p class="eyebrow">Patch</p>
+        <div id="testlamp" class="testlamp" hidden>Tests</div>
+        <pre id="diffview" class="diffview"></pre>
+      </div>
       <h2>Mission log</h2>
       <p class="clock-note">T+ is a replay clock. Each event advances it by four seconds. Those marks are not measured latency.</p>
       <ol id="log" class="log"></ol>
@@ -106,7 +118,7 @@
     <div class="board-head">
       <p class="eyebrow">Flight data</p>
       <h2>Frozen test, team-eval-v1</h2>
-      <p class="honesty">Task-success intervals include zero. The 1.5B adapter is not a statistically significant task-success gain. Team LoRA lost one of two trap refusals. Team distill has not been scored.</p>
+      <p class="honesty">Task-success intervals include zero. The 1.5B adapter is not a statistically significant task-success gain. Team LoRA lost one of two trap refusals on the archived run. Team distill is scored under harness v3, and that task-success difference is not significant. Orbit Code on code-eval-v2 is pending, not scored. The earlier code split is superseded because the team harness stopped a red build before the coder could revise. The Boardroom replay is a scripted demo on fictional files. The flight wall below is the archived v2 run.</p>
     </div>
     <div class="score-row" id="score-row"></div>
     <div class="chart-grid">
@@ -125,7 +137,7 @@
     </div>
     <div class="lower-grid">
       <figure>
-        <figcaption>Paired difference, Team LoRA minus team base. The red line is zero. Distill is not scored.</figcaption>
+        <figcaption>Paired difference, Team LoRA minus team base, on the archived v2 run. The red line is zero. Team distill is in the harness-v3 table.</figcaption>
         <canvas id="paired-chart" data-height="210" aria-label="Paired bootstrap intervals"></canvas>
       </figure>
       <div class="trap-panel">

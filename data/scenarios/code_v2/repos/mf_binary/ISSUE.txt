@@ -1,0 +1,1 @@
+locate returns the index of target in a sorted list, or -1 when it is absent. The last index is a valid hit. Do not edit tests.

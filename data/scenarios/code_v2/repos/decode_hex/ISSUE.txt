@@ -1,0 +1,1 @@
+decode_hex turns a hex string into ASCII. Uppercase hex digits are valid. Do not edit tests.

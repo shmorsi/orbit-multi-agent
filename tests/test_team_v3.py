@@ -170,7 +170,7 @@ def test_readme_names_the_round_table_as_not_scored():
     readme = Path("README.md").read_text(encoding="utf-8")
     block = readme.split("<!-- RESULTS_START -->", 1)[1].split("<!-- RESULTS_END -->", 1)[0]
     assert "The round-table team is not scored." in block
-    assert "Those v3 scores are not in yet." in block
+    assert "Those v3 scores are not in yet." not in block
     assert "| Round-table team | not scored | | | |" in block
     assert "Round-table team | 0" not in block
     assert "Round-table team | 1" not in block

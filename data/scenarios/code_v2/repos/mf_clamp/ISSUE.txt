@@ -1,0 +1,1 @@
+reading clamps value into the closed interval between the two ends, even when the ends are given out of order. Do not edit tests.

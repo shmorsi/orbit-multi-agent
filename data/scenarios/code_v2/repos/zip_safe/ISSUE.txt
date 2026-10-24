@@ -1,0 +1,1 @@
+zip_equal pairs items from two sequences and returns None when the lengths differ. Do not edit tests.

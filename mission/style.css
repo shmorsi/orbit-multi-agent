@@ -92,6 +92,118 @@ button, input, select, textarea {
   border-color: rgba(142, 197, 255, 0.45);
 }
 
+.scenarios {
+  display: flex;
+  gap: 8px;
+}
+
+.scenarios button {
+  border: 1px solid var(--line);
+  padding: 8px 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.scenarios button.on,
+.scenarios button[aria-pressed="true"] {
+  color: #8ec5ff;
+  border-color: rgba(142, 197, 255, 0.7);
+}
+
+.scenario-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  font-size: 13px;
+}
+
+.lanes {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 8px;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ticks { display: flex; gap: 3px; min-height: 8px; }
+.ticks i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+}
+.ticks i.on { background: #8ec5ff; }
+.ticks i.on.bad { background: #ff6b5a; }
+.ticks i.on.good { background: #c8f5d4; }
+
+.codework { margin-bottom: 22px; }
+.testlamp {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 11px;
+  transition: color 420ms ease, border-color 420ms ease, background 420ms ease;
+}
+.testlamp.fail { color: #ffb4ab; border-color: rgba(255, 107, 90, 0.8); background: rgba(255, 107, 90, 0.08); }
+.testlamp.pass { color: #d7ffe4; border-color: rgba(200, 245, 212, 0.75); background: rgba(200, 245, 212, 0.06); }
+.diffview {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #050505;
+  color: #f5f5f7;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.diffview .add { color: #d7ffe4; }
+.diffview .del { color: #ffb4ab; }
+.diffview .meta, .diffview .kw { color: #8ec5ff; }
+.diffview .str { color: #f2c14e; }
+.log li.reject .route { color: #ffb4ab; }
+.log li.fail .detail { color: #ffb4ab; }
+.log li.pass .detail { color: #d7ffe4; }
+.seat.code, .seat.boardroom {
+  width: 88px;
+  height: 88px;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  z-index: 2;
+}
+.seat.code.planner, .seat.boardroom.ceo { --seat-c: var(--planner); color: var(--planner); }
+.seat.code.coder, .seat.boardroom.coo { --seat-c: var(--worker); color: var(--worker); }
+.seat.code.test_runner, .seat.boardroom.cto { --seat-c: var(--scout); color: var(--scout); }
+.seat.code.critic, .seat.boardroom.cfo { --seat-c: var(--critic); color: var(--critic); }
+.seat.code.reviewer, .seat.boardroom.auditor { --seat-c: var(--auditor); color: var(--auditor); border-style: dashed; }
+.seat.code.lit, .seat.boardroom.lit {
+  border-color: var(--seat-c);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--seat-c) 65%, transparent);
+}
+.seat.code.reviewer[data-verdict="refuse"],
+.seat.boardroom.auditor[data-verdict="refuse"] { border-style: solid; border-color: var(--critic); color: var(--critic); }
+.seat.code.reviewer[data-verdict="pass"],
+.seat.boardroom.auditor[data-verdict="pass"] { border-style: solid; border-color: #c8f5d4; color: #d7ffe4; }
+body[data-team="code"] .phases, body[data-team="boardroom"] .phases { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
 body[data-scenario="incident"] #titlecard .kicker {
   color: #8ec5ff;
 }
@@ -562,7 +674,7 @@ textarea { min-height: 72px; resize: vertical; grid-column: 1 / -1; }
   body::before,
   .orbit i,
   .seat { animation: none; }
-  .pulse, .dock, .seat, .titlecard, .phases li, .telemetry, .stage { transition: none !important; }
+  .pulse, .dock, .seat, .titlecard, .phases li, .telemetry, .stage, .testlamp { transition: none !important; }
   .stage.flash-refuse, .stage.flash-pass, #links line { animation: none !important; }
 }
 
@@ -576,7 +688,14 @@ body.shot .titlecard {
   transition: none !important;
 }
 
-body.record .live { display: none; }
+body.record .live,
+body.record .board { display: none; }
+body.record .layout { padding: 18px 28px 8px; gap: 22px; align-items: start; }
+body.record .question { font-size: 18px; min-height: 0; margin-bottom: 10px; }
+body.record .scenario-note { margin-top: 0; }
+body.record .stage { width: min(440px, 100%); }
+body.record .lanes { margin-top: 8px; }
+body.record .diffview { max-height: 320px; font-size: 13px; }
 
 .phases {
   display: grid;

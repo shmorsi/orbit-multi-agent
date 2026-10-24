@@ -1,0 +1,1 @@
+word_count counts words separated by any run of whitespace. Extra spaces are not words. Do not edit tests.
