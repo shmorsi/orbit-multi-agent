@@ -15,14 +15,14 @@ An autonomous incident commander: a local crew that writes the checkout-outage r
 The clip is a scripted demo. The corpus is fictional. Every measured number on this page comes from the frozen makerspace test, not from this outage.
 
 <p align="center">
-  <img src="docs/hero.svg" alt="Orbit. Schema-valid rate 0.607 to 0.780 on the frozen test. Task success 2 of 12 to 3 of 12, interval includes zero. Claude, the round table, and the T4 distill run are pending.">
+  <img src="docs/hero.svg" alt="Orbit. Schema-valid rate 0.607 to 0.780 on the frozen test. Task success 2 of 12 to 3 of 12, interval includes zero. API task success 1 of 12 to 0 of 12, interval includes zero. API schema-valid interval below zero. The round table and the T4 distill run are pending.">
 </p>
 
 | | |
 | --- | --- |
 | **What it is** | The featured replay is an incident commander on a fictional checkout outage: commander, engineer, critic, and a code gate. It is a scripted harness following the oracle, not a model score. The measured runs are three roles on the makerspace corpus. The planner writes at most four steps. The worker calls one sandboxed tool or states a final answer. The critic accepts the claim or sends it back. A grounding gate drops anything the tool results do not support. |
 | **Why it matters** | A tool-calling model can emit valid JSON and still invent the number. Orbit separates those two failures and scores them once on a frozen test. The page reports what landed, including the comparison that did not clear zero. |
-| **Key results** | QLoRA on Qwen2.5-1.5B moved the schema-valid rate from 0.607 to 0.780, shown to three decimal places. That paired interval is above zero. Task success went from 2 of 12 to 3 of 12, and that paired interval includes zero, so the adapter is not separated from the base team on task success. Claude score-v1, Claude score-v2, the round table, and the T4 distill run are pending. |
+| **Key results** | QLoRA on Qwen2.5-1.5B moved the schema-valid rate from 0.607 to 0.780, shown to three decimal places. That paired interval is above zero. Task success went from 2 of 12 to 3 of 12, and that paired interval includes zero, so the adapter is not separated from the base team on task success. The Claude rows are in Key results. The round table and the T4 distill run are pending. |
 
 Fine-tuning taught the format. It did not separate the runs on task success. The files in `results/v2_qwen1.5b/` hold the full values. The diagram below is the measured three-role team. `docs/build_figures.py` draws the hero from those files.
 
@@ -107,7 +107,7 @@ flowchart LR
 
 ## Key results
 
-This block is written by `python -m orbit_agents.eval.readme` from the files in `results/`. API scores and team distill are pending. A pending run is a row that says not scored, with no number filled in.
+This block is written by `python -m orbit_agents.eval.readme` from the files in `results/`. Team distill and the round table stay pending. A pending run is a row that says not scored, with no number filled in.
 
 <!-- RESULTS_START -->
 Rates, losses, and intervals below are the committed values, shown to three decimal places. The JSON files hold the full values.
@@ -133,7 +133,17 @@ The harness changed in v3. Search now lists tables and logs, python can read a b
 
 The round-table team is not scored.
 
-Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, the round table, and the QLoRA distill run on a T4, stay here until a measured file exists. The v3 rescores of the archived runs stay here for the same reason.
+API policy `claude-haiku-5-5`, harness v3, frozen test `team-eval-v1`, each team scored once with the same model and role prompts only. Files: `results/v3_api/claude-haiku-5-5/`.
+
+| Run | Successes | Task-success rate | Schema-valid rate | Trap refusals |
+| --- | --- | --- | --- | --- |
+| v1 team (3 roles) | 1 of 12 | 0.083 | 0.862 | 1 of 2 |
+| v2 team (6 roles) | 0 of 12 | 0.000 | 0.559 | 0 of 2 |
+| Round-table team | not scored | | | |
+
+The paired bootstrap for task success, v2 team minus v1 team, is -0.250 to 0.000 (point -0.083). That interval includes zero. Its schema-valid interval is -0.425 to -0.174 (point -0.303). That interval is below zero.
+
+Pending slots. A row here is not a result. The round table and the QLoRA distill run on a T4 stay here until a measured file exists. The v3 rescores of the archived runs stay here for the same reason.
 
 | Slot | File | Status |
 | --- | --- | --- |
@@ -141,8 +151,6 @@ Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, the 
 | Team base, harness v3 | `results/v3_qwen1.5b/team_base.json` | pending |
 | Team plus adapter, harness v3 | `results/v3_qwen1.5b/team_lora.json` | pending |
 | Team distill, QLoRA on a T4, harness v3 | `results/v3_qwen1.5b/team_distill.json` | pending |
-| Claude policy, three-role team, harness v3 | `results/v3_api/<model>/team_v1.json` | pending |
-| Claude policy, six-role team, harness v3 | `results/v3_api/<model>/team_v2.json` | pending |
 | Claude policy, round table, harness v3 | `results/v3_api/<model>/team_v3.json` | pending |
 <!-- RESULTS_END -->
 
@@ -207,7 +215,7 @@ make score-v1 MODEL=claude-haiku-5-5
 make score-v2 MODEL=claude-haiku-5-5
 ```
 
-Each target scores the frozen test once and writes `results/v3_api/<model>/team_v1.json` or `team_v2.json`. It refuses a config that is already measured. The request cap and the 5 USD cost stop are the distillation script's. When both files are measured, the paired bootstrap of v2 minus v1 is written next to them, and the README generator adds the rows below. The v2 team has not been scored yet.
+Each target scores the frozen test once and writes `results/v3_api/<model>/team_v1.json` or `team_v2.json`. It refuses a config that is already measured. The request cap and the 5 USD cost stop are the distillation script's. When both files are measured, the paired bootstrap of v2 minus v1 is written next to them, and the README generator adds the rows below. Those two files for this model are measured. The rows are in Key results. `make score-v2` refuses a second run.
 
 If `ORBIT_ANTHROPIC_API_KEY` and `ANTHROPIC_API_KEY` are both unset, `make score-v1` and `make score-v2` exit before any request and name `ORBIT_ANTHROPIC_API_KEY`. Nothing is read from a file. `make score-dry-run` does not read a key.
 
@@ -242,13 +250,14 @@ make score-v3 MODEL=claude-haiku-5-5
 - A config is scored once. `eval.run` and `eval.compare` refuse archived files, harness checks, the pending placeholders, and a second score of a measured frozen-test file.
 - Files at the top of `results/` with status pending are not model scores. `results/harness_single.json` and `results/harness_team.json` replay the scripted harness. They are system checks.
 - The manifest also stores a prompt digest from the protocol freeze. Later harness work changed the role prompts. The scorer checks the frozen test and the tag. This page does not treat that prompt digest as a current hash of the prompts.
+- An earlier Claude score crashed on a socket read timeout, wrote no score file, and was rerun from scratch after the transport began returning that timeout as a retryable server error.
 - Cite the project with [CITATION.cff](CITATION.cff).
 
 ## What I'd do next
 
 Future work, not a claim about a result:
 
-- Score the three-role team, the six-role team, and the round table once on the same API model, with `make score-v1`, `make score-v2`, and `make score-v3`, and let the generator add only the rows it can read from measured files.
+- Score the round table once with `make score-v3` and let the generator add that row. The three-role and six-role API scores are already measured.
 - Run the distill notebook once on a Colab T4, score team distill under harness v3, and commit only `results/v3_qwen1.5b/*.json` and `README.md`.
 - Keep the archived v2 numbers in `results/v2_qwen1.5b/` and do not compare them with a v3 score.
 - Train more than one seed before talking about a distribution. This page has one training run per config.
@@ -258,9 +267,9 @@ Future work, not a claim about a result:
 - The frozen test is 12 tasks, 2 of them traps. One task moves a rate by a twelfth, so only large effects can clear zero.
 - Each model was trained once and scored once. There is no seed sweep.
 - The adapter that added a success also missed a trap: correct refusals went from 2 to 1.
-- The harness changed in v3. The v2 numbers are archived and are not compared with v3 runs. No v3 model score is in yet.
+- The harness changed in v3. The archived Qwen numbers are not compared with a harness-v3 rescore of those runs. Those Qwen rescores are not in yet.
 - Team distill has not been scored. The notebook below is the path to that one score.
-- The v2 team (6 roles) has not been scored. Its traces in `mission/traces/v2/` come from the scripted harness, which follows each task's oracle; they show the protocol, not model skill.
+- The six-role API score is in Key results. The traces in `mission/traces/v2/` still come from the scripted harness, which follows each task's oracle; they show the protocol, separate from that score.
 - The round-table team has not been scored. Its traces in `mission/traces/v3/` are the same kind of harness replay.
 - The free-T4 wall clock for training plus scoring has not been measured.
 

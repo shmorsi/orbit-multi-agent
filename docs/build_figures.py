@@ -1,8 +1,9 @@
 """Draw the README diagrams from the measured results and the engine constants.
 
 The type is Inter Tight, already bundled for Mission Control, outlined to paths so the
-picture does not depend on a font being installed. Numbers come from
-results/v2_qwen1.5b. Nothing in this file is a new measurement.
+picture does not depend on a font being installed. The Qwen figures come from
+results/v2_qwen1.5b. When a measured API pair exists, the third column reads
+results/v3_api. Nothing in this file is a new measurement.
 
     python docs/build_figures.py
     python docs/build_figures.py --check
@@ -196,7 +197,7 @@ def _phrase(interval: dict) -> str:
 
 
 def story(root: Path = ROOT) -> dict[str, str]:
-    """The hero copy. Every figure is read from the v2 result files."""
+    """The hero copy. Qwen figures come from the v2 result files."""
     folder = root / "results" / "v2_qwen1.5b"
     base = _read(folder / "team_base.json")
     lora = _read(folder / "team_lora.json")
@@ -212,13 +213,64 @@ def story(root: Path = ROOT) -> dict[str, str]:
     }
 
 
+def api_story(root: Path = ROOT) -> dict[str, str] | None:
+    """Measured v1 and v2 API scores, if both files and their comparison exist."""
+    folder = root / "results" / "v3_api"
+    if not folder.is_dir():
+        return None
+    for model_dir in sorted(path for path in folder.iterdir() if path.is_dir()):
+        left_path = model_dir / "team_v1.json"
+        right_path = model_dir / "team_v2.json"
+        comparison_path = model_dir / "comparison.json"
+        if not (left_path.is_file() and right_path.is_file() and comparison_path.is_file()):
+            continue
+        left = _read(left_path)
+        right = _read(right_path)
+        comparison = _read(comparison_path)
+        if left.get("status") != "measured" or right.get("status") != "measured":
+            continue
+        if comparison.get("status") != "measured":
+            continue
+        pair = comparison.get("pairs", {}).get("team_v2_minus_team_v1")
+        if not pair:
+            continue
+        return {
+            "model": str(left["model"]),
+            "v1_success": f"{left['n_success']} of {left['n_tasks']}",
+            "v2_success": f"{right['n_success']} of {right['n_tasks']}",
+            "success_phrase": _phrase(pair["task_success_rate"]),
+            "schema_phrase": _phrase(pair["schema_valid_rate"]),
+        }
+    return None
+
+
 def hero_svg(root: Path = ROOT) -> str:
     facts = story(root)
-    desc = (
-        f"Schema-valid rate {facts['base_schema']} to {facts['lora_schema']}, {facts['schema_phrase']}. "
-        f"Task success {facts['base_success']} to {facts['lora_success']}, {facts['success_phrase']}. "
-        f"Model {facts['model']}. Claude v1, Claude v2, and the T4 distill run are pending, not measured."
-    )
+    api = api_story(root)
+    if api is None:
+        desc = (
+            f"Schema-valid rate {facts['base_schema']} to {facts['lora_schema']}, {facts['schema_phrase']}. "
+            f"Task success {facts['base_success']} to {facts['lora_success']}, {facts['success_phrase']}. "
+            f"Model {facts['model']}. Claude v1, Claude v2, and the T4 distill run are pending, not measured."
+        )
+        third = (840, "03  PENDING", "Claude v1 and v2", None, "not measured", "T4 QLoRA distill", False)
+    else:
+        desc = (
+            f"Schema-valid rate {facts['base_schema']} to {facts['lora_schema']}, {facts['schema_phrase']}. "
+            f"Task success {facts['base_success']} to {facts['lora_success']}, {facts['success_phrase']}. "
+            f"Model {facts['model']}. API task success {api['v1_success']} to {api['v2_success']}, "
+            f"{api['success_phrase']}. API schema-valid {api['schema_phrase']}. "
+            "The T4 distill run and the round table are pending, not measured."
+        )
+        third = (
+            840,
+            "03  API TASK SUCCESS",
+            api["v1_success"],
+            api["v2_success"],
+            api["success_phrase"],
+            api["model"],
+            False,
+        )
     canvas = Canvas(1200, 560, "Orbit", desc)
     canvas.grid()
     canvas.rule(56, 1144, 48)
@@ -255,7 +307,7 @@ def hero_svg(root: Path = ROOT) -> str:
             "frozen test  one score each",
             False,
         ),
-        (840, "03  PENDING", "Claude v1 and v2", None, "not measured", "T4 QLoRA distill", False),
+        third,
     )
     for x, label, left, right, phrase, detail, accent in columns:
         canvas.text(label, x, 330, 12, weight=560, fill=ACCENT if accent else DIM, tracking=1.8)

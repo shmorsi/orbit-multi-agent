@@ -2,7 +2,7 @@ import json
 import re
 from pathlib import Path
 
-NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+NUMBER_RE = re.compile(r"(?<![A-Za-z0-9.])(?<!py )-?\d+(?:\.\d+)?")
 RESULTS_RE = re.compile(r"<!-- RESULTS_START -->(.*)<!-- RESULTS_END -->", re.S)
 
 

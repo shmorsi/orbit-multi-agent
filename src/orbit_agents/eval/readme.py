@@ -263,7 +263,7 @@ def _api(root: Path) -> list[str]:
             schema = pair["schema_valid_rate"]
             lines.append(
                 f"The paired bootstrap for task success, v2 team minus v1 team, is {_interval(success)}. "
-                f"{_zero(success)} Its schema-valid interval is {_interval(schema)}."
+                f"{_zero(success)} Its schema-valid interval is {_interval(schema)}. {_zero(schema)}"
             )
     return lines
 
@@ -293,13 +293,20 @@ def _pending(root: Path) -> list[str]:
             slots.append((label, path))
     if not slots:
         return ["", "No pending model slot. Every configured score file is measured."]
-    lines = [
-        "",
-        (
+    if seen["team_v1"] or seen["team_v2"]:
+        intro = (
+            "Pending slots. A row here is not a result. The round table and the QLoRA distill run on a T4 stay here "
+            "until a measured file exists. The v3 rescores of the archived runs stay here for the same reason."
+        )
+    else:
+        intro = (
             "Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, the round table, and the "
             "QLoRA distill run on a T4, stay here until a measured file exists. The v3 rescores of the archived runs "
             "stay here for the same reason."
-        ),
+        )
+    lines = [
+        "",
+        intro,
         "",
         "| Slot | File | Status |",
         "| --- | --- | --- |",

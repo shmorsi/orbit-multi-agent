@@ -1,0 +1,40 @@
+{
+  "status": "measured",
+  "kind": "comparison",
+  "n_resamples": 10000,
+  "seed": 0,
+  "pairs": {
+    "team_v2_minus_team_v1": {
+      "task_success_rate": {
+        "point": -0.08333333333333333,
+        "low": -0.25,
+        "high": 0.0,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": 0.6666666666666666,
+        "low": -0.16666666666666666,
+        "high": 1.3333333333333333,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": -0.3030753968253968,
+        "low": -0.425,
+        "high": -0.17410714285714288,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    }
+  }
+}
