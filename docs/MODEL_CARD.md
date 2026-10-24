@@ -8,7 +8,7 @@ The measured models are Qwen2.5-0.5B-Instruct and Qwen2.5-1.5B-Instruct, fine-tu
 
 The student is the three-role team: planner, worker, and critic. Training dialogues come from the bundled fictional makerspace corpus and from the generators described in `finetune/PROTOCOL.md`. The corpus is in `data/corpus/`. Dialogue counts and the training config are in `results/v2_qwen1.5b/RUN.json` and `finetune/configs/`. Hyperparameters were not changed in this polish pass.
 
-A distillation path asks a teacher (Claude by default, Gemini as an option) to produce trajectories on train and tune tasks only. That score is not in yet. The notebook is `notebooks/run_distill_and_score.ipynb`.
+A distillation path asks a teacher (Claude by default, Gemini as an option) to produce trajectories on train and tune tasks only. That score is not in yet. The distill config sets `max_seq_length` to 1536. The trainer refuses a shorter cap, because truncation drops the assistant turn. The notebook is `notebooks/run_distill_and_score.ipynb`.
 
 ## What was not trained
 
