@@ -10,6 +10,7 @@ from orbit_agents.corpus import load_table, read_text
 
 
 def main() -> None:
+    """Child process for one sandboxed python cell."""
     code = sys.stdin.read()
     buffer = io.StringIO()
 

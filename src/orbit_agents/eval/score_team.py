@@ -9,10 +9,12 @@ team-eval-v1. It refuses to run when the output file is already measured. An
 API run goes through AnthropicPolicy, which reuses the distillation request cap
 and cost stop. A run that stops early writes `status: stopped` and no metrics.
 
-Results go under results/v3_api/<model>/team_v1.json or team_v2.json. The
-folder name says harness v3, the same tools and gate as results/v3_qwen1.5b/.
-When both teams are measured for one model, comparison.json holds the paired
-bootstrap of v2 minus v1. The README generator reads only measured files.
+Results go under results/v3_api/<model>/team_v1.json, team_v2.json, or
+team_v3.json. The folder name says harness v3, the same tools and gate as
+results/v3_qwen1.5b/. When both the three-role and six-role teams are measured
+for one model, comparison.json holds the paired bootstrap of v2 minus v1.
+The round-table team is a separate file. The README generator reads only
+measured files.
 """
 
 from __future__ import annotations
@@ -31,7 +33,8 @@ from orbit_agents.policy import PER_TASK_PROVIDERS, PolicyBackend, make_policy
 from orbit_agents.tasks import read_jsonl
 
 API_RESULTS = Path("results") / "v3_api"
-TEAMS = {"v1": "v1 team (3 roles)", "v2": "v2 team (6 roles)"}
+TEAMS = {"v1": "v1 team (3 roles)", "v2": "v2 team (6 roles)", "v3": "Round-table team"}
+N_ROLES = {"v1": 3, "v2": 6, "v3": 10}
 DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_MAX_COST_USD = 5.0
 # The teacher's backoff schedule: up to three retries per request, each counted.
@@ -39,9 +42,13 @@ RETRIES_PER_REQUEST = 3
 PROTOCOL = "team-eval-v1"
 
 
-def request_bound(n_tasks: int) -> dict:
-    """Requests this command can send. Every team turn, schema retry included, is one request."""
-    turns = n_tasks * MAX_TURNS
+def request_bound(n_tasks: int, extra_turns: int = 0) -> dict:
+    """Requests this command can send. Every team turn, schema retry included, is one request.
+
+    extra_turns covers round-table seats that do not spend the specialist turn limit.
+    The v1 and v2 bound leaves it at zero.
+    """
+    turns = n_tasks * (MAX_TURNS + extra_turns)
     return {
         "preflight": 1,
         "max_turn_requests": turns,
@@ -51,6 +58,7 @@ def request_bound(n_tasks: int) -> dict:
 
 
 def verify_frozen_test(root: Path = ROOT) -> dict:
+    """Check eval/test.jsonl against the manifest and, when present, the git tag."""
     manifest = json.loads((root / "eval" / "manifest.json").read_text(encoding="utf-8"))
     body = (root / "eval" / "test.jsonl").read_bytes()
     digest = hashlib.sha256(body).hexdigest()
@@ -70,12 +78,14 @@ def verify_frozen_test(root: Path = ROOT) -> dict:
 
 
 def output_path(root: Path, team: str, model: str) -> Path:
+    """Where one API team score is written, under results/v3_api."""
     if not model or not all(char.isalnum() or char in "._-" for char in model):
         raise SystemExit(f"refusing model name {model!r}")
     return root / API_RESULTS / model / f"team_{team}.json"
 
 
 def is_measured(path: Path) -> bool:
+    """True when the file exists and is a measured model eval."""
     if not path.is_file():
         return False
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -83,6 +93,10 @@ def is_measured(path: Path) -> bool:
 
 
 def _runner(team: str):
+    if team == "v3":
+        from orbit_agents.team_v3 import run_team_v3
+
+        return lambda task, policy, workspace: run_team_v3(task, policy, workspace)
     if team == "v2":
         from orbit_agents.team_v2 import run_team_v2
 
@@ -134,6 +148,7 @@ def write_comparison(folder: Path) -> Path | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Argument parser for one frozen API score."""
     parser = argparse.ArgumentParser(description="Score one team once on the frozen test")
     parser.add_argument("--team", choices=tuple(TEAMS), required=True)
     parser.add_argument("--provider", choices=("anthropic", "transformers", "ollama", "llamacpp"), default="anthropic")
@@ -149,10 +164,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None, *, policy=None) -> dict:
+    """Score one team once on the frozen test, unless that file is already measured."""
     args = build_parser().parse_args(argv)
     frozen = verify_frozen_test(args.root)
     tasks = read_jsonl(args.root / "eval" / "test.jsonl")
-    bound = request_bound(len(tasks))
+    from orbit_agents.team_v3 import ROUND_TURNS
+
+    bound = request_bound(len(tasks), ROUND_TURNS if args.team == "v3" else 0)
     max_requests = args.max_requests or bound["hard_cap"]
     if max_requests < 1 or args.max_cost_usd < 0:
         raise SystemExit("--max-requests must be at least 1 and --max-cost-usd zero or more")
@@ -192,7 +210,7 @@ def main(argv: list[str] | None = None, *, policy=None) -> dict:
         "protocol": PROTOCOL,
         "test_sha256": frozen["test_sha256"],
         "harness": "v3",
-        "n_roles": 6 if args.team == "v2" else 3,
+        "n_roles": N_ROLES[args.team],
         "mode": f"team_{args.team}",
         "team": args.team,
         "team_label": TEAMS[args.team],

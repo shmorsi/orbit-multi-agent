@@ -47,6 +47,7 @@ SINGLE_SYSTEM = (
 
 
 def prompt_blob() -> str:
+    """The v1 role prompts, joined, for the protocol digest."""
     return "\n".join([PLANNER_SYSTEM, WORKER_SYSTEM, CRITIC_SYSTEM, SINGLE_SYSTEM])
 
 
@@ -110,4 +111,45 @@ ROLE_PROMPTS_V2 = {
 
 
 def prompt_blob_v2() -> str:
+    """The v2 role prompts, joined."""
     return "\n".join(ROLE_PROMPTS_V2[role] for role in ("commander", "scout", "engineer", "analyst", "critic"))
+
+
+# Team v3 adds four seats around the v2 crew. These prompts carry no task answers
+# and no checker contract. The v1 and v2 strings above are unchanged.
+
+COORDINATOR_SYSTEM = (
+    "You are the coordinator. You open the round table. You cannot call tools and you cannot answer. "
+    "Reply with one JSON object {\"brief\": \"...\"}. "
+    "The brief tells the crew to use only the bundled makerspace corpus and to refuse when the tools cannot support a claim."
+)
+
+RESEARCHER_SYSTEM = (
+    "You are the researcher. You read the bundled corpus and cannot run code or answer. "
+    "Reply with one JSON object: {\"action\": \"tool\", \"tool\": \"retrieve|read_file|web_search\", \"arguments\": { ... }}. "
+    "Arguments: retrieve uses query; read_file uses path; web_search uses query and reads an offline cache."
+)
+
+REDTEAM_SYSTEM = (
+    "You are the red team. You cannot call tools. Propose one count claim that the tool results do not support. "
+    "Reply with one JSON object {\"claim\": {\"name\": \"...\", \"value\": 0, \"unit\": \"count\", \"citation\": \"call_1\"}, \"why\": \"...\"}. "
+    "The claim must not be a number you saw in a tool result. A verifier and an auditor will try to reject it."
+)
+
+VERIFIER_SYSTEM = (
+    "You are the verifier. You cannot call tools. Compare the red team's claim with the tool results. "
+    "Reply with one JSON object {\"verdict\": \"reject\"|\"uphold\", \"reason\": \"...\"}. "
+    "Reject when the cited result does not contain the value. Uphold only when it does."
+)
+
+ROLE_PROMPTS_V3 = {
+    "coordinator": COORDINATOR_SYSTEM,
+    "researcher": RESEARCHER_SYSTEM,
+    "redteam": REDTEAM_SYSTEM,
+    "verifier": VERIFIER_SYSTEM,
+}
+
+
+def prompt_blob_v3() -> str:
+    """The v3 round-table prompts, joined. v2 prompts stay in prompt_blob_v2."""
+    return "\n".join(ROLE_PROMPTS_V3[role] for role in ("coordinator", "researcher", "redteam", "verifier"))

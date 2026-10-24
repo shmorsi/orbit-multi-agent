@@ -4,15 +4,21 @@ import json
 from pathlib import Path
 
 import pytest
-
 from distill_teacher import teacher_contract, trajectory_ok
-from orbit_agents.engine import UNGROUNDED, claims_are_grounded, contains_number, extract_json, run_team
+from variants import iter_specs
+
+from orbit_agents.engine import (
+    UNGROUNDED,
+    claims_are_grounded,
+    contains_number,
+    extract_json,
+    run_team,
+)
 from orbit_agents.eval.build_tasks import expand
 from orbit_agents.eval.checks import evaluate
 from orbit_agents.scripted import ScriptedBackend
 from orbit_agents.tasks import task_by_id
 from orbit_agents.tools import call_tool, run_python, run_retrieve
-from variants import iter_specs
 
 COUNT_QUESTION = "From the jobs table, count rows whose machine cell is printer-a."
 LOG_QUESTION = "In logs/printer-a.log, how many lines contain the token J02?"

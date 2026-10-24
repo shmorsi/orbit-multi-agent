@@ -6,6 +6,7 @@ import argparse
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Dispatch doctor, serve, traces, and score."""
     parser = argparse.ArgumentParser(prog="orbit", description="Orbit: Multi-Agent Mission Control")
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="Check Python, device, and one tiny task")
@@ -14,7 +15,7 @@ def main(argv: list[str] | None = None) -> None:
     serve = sub.add_parser("serve", help="Mission control plus live runs")
     serve.add_argument("--port", type=int, default=8741)
     traces = sub.add_parser("traces", help="Rewrite the bundled mission-control traces from the engine")
-    traces.add_argument("--team", choices=("v1", "v2"), default="v1")
+    traces.add_argument("--team", choices=("v1", "v2", "v3"), default="v1")
     sub.add_parser("score", help="Score one team once on the frozen test (see --help)", add_help=False)
     if argv is None:
         import sys

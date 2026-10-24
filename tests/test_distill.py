@@ -5,44 +5,42 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 from distill_teacher import (
-    DEFAULT_ATTEMPTS,
-    DEFAULT_MAX_REQUESTS,
     ANTHROPIC_PRICES,
     ANTHROPIC_REQUESTS_PER_MINUTE,
     DEFAULT_ANTHROPIC_MODEL,
+    DEFAULT_ATTEMPTS,
     DEFAULT_GEMINI_MODEL,
-    GEMINI_TEMPERATURE,
     DEFAULT_MAX_COST_USD,
+    DEFAULT_MAX_REQUESTS,
     DEFAULT_MODEL,
     DEFAULT_REQUESTS_PER_MINUTE,
     FALLBACK_PRICE,
-    LONG_CONTEXT_TOKENS,
+    FROZEN_FRAGMENTS,
+    GEMINI_TEMPERATURE,
     HIGH_DEMAND_STATUS,
+    LONG_CONTEXT_TOKENS,
     MINUTE_QUOTA_MAX_WAIT_SECONDS,
     PREFLIGHT_PROMPT,
     SERVER_ATTEMPTS,
     SERVER_BACKOFF_SECONDS,
     AnthropicClient,
-    BillingStop,
     BudgetStop,
     CostStop,
     DistillStop,
     FatalHTTPStop,
-    FROZEN_FRAGMENTS,
     GeminiClient,
     NetworkStop,
     QuotaStop,
     RequestBudget,
+    TeacherBackend,
     build_parser,
     estimate_cost_usd,
-    resolve_runtime,
-    TeacherBackend,
     load_checkpoint,
     load_pool,
     main,
     narrow_tasks,
+    resolve_runtime,
     rows_from_result,
     run_distill,
     select_tasks,
@@ -51,10 +49,11 @@ from distill_teacher import (
     uses_frozen_oracle,
 )
 from leakage import TEST, _read, overlap_error
+from train import assert_training_file, data_paths
+
 from orbit_agents.engine import run_team
 from orbit_agents.scripted import ScriptedBackend
 from orbit_agents.tasks import task_by_id
-from train import assert_training_file, data_paths
 
 
 def _ok_body(text="{}"):
@@ -244,7 +243,7 @@ def test_http_401_and_403_without_quota_stop_immediately():
     for status, message in ((401, "API key not valid"), (403, "permission denied")):
         calls = {"n": 0}
 
-        def transport(url, headers, payload, timeout, status=status, message=message):
+        def transport(url, headers, payload, timeout, status=status, message=message, calls=calls):
             del url, headers, payload, timeout
             calls["n"] += 1
             return status, {"error": {"message": message}}
@@ -938,7 +937,7 @@ def test_anthropic_429_and_529_back_off_then_continue():
         calls = {"n": 0}
         budget, sleeps = _clocked_budget()
 
-        def transport(url, headers, payload, timeout, status=status):
+        def transport(url, headers, payload, timeout, status=status, calls=calls):
             del url, headers, payload, timeout
             calls["n"] += 1
             if calls["n"] == 1:
