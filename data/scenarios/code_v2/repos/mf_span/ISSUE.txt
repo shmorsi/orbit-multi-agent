@@ -1,0 +1,1 @@
+meetings_overlap treats both ranges as closed, so a shared endpoint is an overlap. Do not edit tests.

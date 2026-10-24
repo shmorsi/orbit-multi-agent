@@ -1,0 +1,1 @@
+parse_query splits a query on & and =. A value may contain %20, which is one space. Do not edit tests.

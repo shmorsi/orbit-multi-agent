@@ -1,0 +1,1 @@
+wait_for(attempt) is base * 2**attempt with base 1. attempt 0 returns 1. Do not edit tests.

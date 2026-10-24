@@ -278,7 +278,7 @@ def hero_svg(root: Path = ROOT) -> str:
     canvas.text("MULTI-AGENT MISSION CONTROL", 1144, 82, 12, weight=560, fill=MUTED, tracking=2.2, anchor="end")
     canvas.text("Fixes real code.", 56, 168, 52, weight=640, tracking=-1.0)
     canvas.text("Refuses a patch that fails its tests.", 56, 214, 26, weight=560, fill=MUTED, tracking=-0.3)
-    canvas.text("Code benchmark pending, not scored. Makerspace figures below are measured.", 56, 252, 16, weight=440, fill=DIM)
+    canvas.text("code-eval-v2 pending, not scored. Makerspace figures below are measured.", 56, 252, 16, weight=440, fill=DIM)
     canvas.rule(56, 1144, 286)
 
     columns = (

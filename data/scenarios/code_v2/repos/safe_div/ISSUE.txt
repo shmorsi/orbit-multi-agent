@@ -1,0 +1,1 @@
+safe_div(n, d) divides n by d and returns None when d is 0. Do not edit tests.

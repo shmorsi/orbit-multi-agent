@@ -1,0 +1,1 @@
+join_path joins parts with a single slash and drops empty parts. Do not edit tests.

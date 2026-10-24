@@ -12,7 +12,7 @@ A distillation path asks a teacher (Claude by default, Gemini as an option) to p
 
 ## Orbit Code and the boardroom
 
-Orbit Code is a planner, coder, test runner, and reviewer. The reviewer is code: it rejects a patch whose tests fail or whose diff touches the tests. The frozen split is `data/scenarios/code/`, protocol `code-eval-v1`. It has not been scored. `python -m orbit_agents.eval.score_code --dry-run` prints the request bound and the cost cap and writes nothing. A measured file would land in `results/code/<model>/<config>.json`. Until that file exists, the README says pending, not scored.
+Orbit Code is a planner, coder, test runner, and reviewer. The reviewer is code: it rejects a patch whose tests fail or whose diff touches the tests. The split to score is `data/scenarios/code_v2/`, protocol `code-eval-v2`. It is pending, not scored. `python -m orbit_agents.eval.score_code --dry-run` prints the request bound and the cost cap and writes nothing. A measured file lands in `results/code_v2/<model>/<config>.json`. Until that file exists, the README says pending, not scored. `results/code/claude-haiku-5-5/` is the superseded `code-eval-v1` record. The team harness used for that run stopped when the planner reply failed the schema, and a critic accept stopped a red build before the coder could revise. Those files are not the current score.
 
 The boardroom is a scripted demo on fictional company files. The auditor refuses a claim the cited file does not support. It is not a model score.
 

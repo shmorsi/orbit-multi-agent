@@ -38,7 +38,7 @@ The distill and training notebooks on a free Colab T4 are `notebooks/run_distill
 
 ## Orbit Code
 
-Protocol id: `code-eval-v1`. The frozen files are under `data/scenarios/code/`. The manifest stores the bundle hash and the split tag. Hidden tests are not in the prompt. `make score-code-dry-run` checks that hash, prints the request bound and the cost cap, and writes nothing.
+Protocol id: `code-eval-v2`. The frozen files are under `data/scenarios/code_v2/`. The manifest stores the bundle hash and the split tag. Hidden tests are not in the prompt. `make score-code-dry-run` checks that hash, prints the request bound and the cost cap, and writes nothing. `code-eval-v1` under `data/scenarios/code/` is an earlier split. It was scored, and that score is superseded because the team harness stopped when the planner reply failed the schema and when a critic accept ended a red build. Those files stay in `results/code/`. They are not the current score. v2 is pending, not scored.
 
 ```bash
 make score-code-dry-run MODEL=claude-haiku-5-5
@@ -46,7 +46,7 @@ export ORBIT_ANTHROPIC_API_KEY=your-key
 make score-code MODEL=claude-haiku-5-5
 ```
 
-`make score-code` writes `results/code/<model>/single.json` and `team.json` once each. A file that is already measured is refused. The README block then reads pass@1, the hidden-test pass rate, reviewer rejections, tokens, and cost from those files. Until a file is measured, the row says pending, not scored.
+`make score-code` writes `results/code_v2/<model>/single.json` and `team.json` once each. A file that is already measured is refused. The README block then reads pass@1, the hidden-test pass rate, reviewer rejections, tokens, and cost from those files. Until a file is measured, the row says pending, not scored. The superseded `code-eval-v1` record is not rewritten.
 
 A local Qwen dry-run, which does not load weights:
 

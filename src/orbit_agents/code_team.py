@@ -24,7 +24,7 @@ from orbit_agents.code_sandbox import (
     unified_diff,
 )
 from orbit_agents.codebench import materialize, task_prompt
-from orbit_agents.engine import MAX_CRITIC_RETRIES, MAX_SCHEMA_TRIES, MAX_TURNS, REPAIR, RunResult, extract_json
+from orbit_agents.engine import MAX_CRITIC_RETRIES, MAX_SCHEMA_TRIES, MAX_TURNS, RunResult, extract_json, repair_message
 
 PLANNER_SYSTEM = (
     "You are the planner on Orbit Code. You cannot edit files. "
@@ -110,12 +110,122 @@ FLIGHT_RULES_CODE = {
 }
 
 
+def _coerce(role: str, payload: dict) -> dict:
+    """Drop extra fields the schema forbids. A long plan goal is shortened, not rejected."""
+    if role == "planner":
+        steps = payload.get("steps")
+        if not isinstance(steps, list):
+            return payload
+        cleaned = []
+        for step in steps[:4]:
+            goal = step.get("goal") if isinstance(step, dict) else step
+            if not isinstance(goal, str) or not goal.strip():
+                continue
+            cleaned.append({"goal": goal.strip()[:200]})
+        if cleaned:
+            return {"steps": cleaned}
+    elif role == "coder":
+        edits = payload.get("edits")
+        if not isinstance(edits, list):
+            return payload
+        cleaned = []
+        for edit in edits[:4]:
+            if not isinstance(edit, dict):
+                continue
+            path = edit.get("path")
+            content = edit.get("content")
+            if isinstance(path, str) and path.strip() and isinstance(content, str) and content:
+                cleaned.append({"path": path.strip(), "content": content})
+        if cleaned:
+            return {"edits": cleaned}
+    elif role == "critic" and payload.get("verdict") in {"accept", "revise"}:
+        reason = payload.get("reason")
+        text = reason.strip() if isinstance(reason, str) else ""
+        return {"verdict": payload["verdict"], "reason": (text or "See the test result.")[:300]}
+    return payload
+
+
 def _check(role: str, payload: dict) -> str | None:
     try:
         jsonschema.validate(payload, SCHEMAS[role])
     except jsonschema.ValidationError as exc:
         return exc.message
     return None
+
+
+def _looks_like_diff(content: str) -> bool:
+    lines = content.splitlines()
+    return any(line.startswith("@@") for line in lines) and any(
+        line.startswith("--- ") or line.startswith("+++ ") for line in lines
+    )
+
+
+def _same_line(left: str, right: str) -> bool:
+    return left == right or left.rstrip("\n") == right.rstrip("\n")
+
+
+def _apply_unified(original: str, diff: str) -> str | None:
+    """Apply one unified diff to the original file. None when the hunks do not fit."""
+    lines = original.splitlines(keepends=True)
+    hunks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("@@"):
+            current = [line]
+            hunks.append(current)
+        elif current is not None:
+            current.append(line)
+    if not hunks:
+        return None
+    for hunk in reversed(hunks):
+        marker = hunk[0].split("@@")
+        if len(marker) < 2:
+            return None
+        start_text = marker[1].strip().split()[0].split(",")[0]
+        try:
+            start = int(start_text)
+        except ValueError:
+            return None
+        index = max(start - 1, 0)
+        cursor = index
+        built: list[str] = []
+        for raw in hunk[1:]:
+            if raw.startswith("\\"):
+                continue
+            prefix, body = raw[:1], raw[1:]
+            if prefix == " ":
+                if cursor >= len(lines) or not _same_line(lines[cursor], body):
+                    return None
+                built.append(lines[cursor])
+                cursor += 1
+            elif prefix == "-":
+                if cursor >= len(lines):
+                    return None
+                cursor += 1
+            elif prefix == "+":
+                built.append(body if body.endswith("\n") or body == "" else body + "\n")
+            else:
+                return None
+        lines = lines[:index] + built + lines[cursor:]
+    return "".join(lines)
+
+
+def _place_edit(workspace: Path, edit: dict, before: dict[str, str]) -> dict:
+    """Map a model path onto a workspace file, and expand a unified diff into file contents."""
+    from orbit_agents.code_sandbox import safe_relative
+
+    relative = safe_relative(edit["path"])
+    content = edit["content"]
+    if relative not in before:
+        name = Path(relative).name
+        matches = [path for path in before if Path(path).name == name and path.endswith(".py")]
+        if len(matches) == 1:
+            relative = matches[0]
+    if _looks_like_diff(content):
+        applied = _apply_unified(before.get(relative, ""), content)
+        if applied is not None:
+            content = applied
+    return {"path": relative, "content": content}
 
 
 class CodeRun:
@@ -158,7 +268,7 @@ class CodeRun:
             raw = self.policy.complete_text(prompt, SCHEMAS[role], role=role)
             self._event(role, "message", step=self.n_steps, content=raw)
             try:
-                payload = extract_json(raw)
+                payload = _coerce(role, extract_json(raw))
                 error = _check(role, payload)
             except ValueError as exc:
                 payload = None
@@ -171,7 +281,7 @@ class CodeRun:
             self._event(role, "invalid", step=self.n_steps, error=error or "invalid")
             prompt = prompt + [
                 {"role": "assistant", "content": raw},
-                {"role": "user", "content": REPAIR},
+                {"role": "user", "content": repair_message(error or "invalid")},
             ]
         return None
 
@@ -207,34 +317,54 @@ class CodeRun:
         state = "Tests passed." if result.get("ok") else "Tests failed."
         return f"{state} Summary: {result.get('summary', '')}\n\nDiff:\n{self._diff()[-1500:]}"
 
+    def _coder_extra(self, plan_text: str) -> str:
+        parts = [part for part in (plan_text, self.feedback) if part]
+        return "\n\n".join(parts)
+
+    def _ask_critic(self, pytest_result: dict) -> dict | None:
+        return self._complete(
+            "critic",
+            [
+                {"role": "system", "content": CRITIC_SYSTEM},
+                {"role": "user", "content": self._user(self._critic_note(pytest_result))},
+            ],
+        )
+
     def execute(self) -> RunResult:
-        """Run the loop and return the trace. The reviewer runs in this process."""
+        """Run the loop and return the trace. The reviewer runs in this process.
+
+        A planner reply that fails the schema does not skip the coder. A red
+        build is sent back even when the critic says accept, unless the diff
+        touches a test file. That stop stays a rejection.
+        """
         self._prepare()
+        plan_text = ""
         if not self.single:
             plan = self._complete(
                 "planner",
                 [{"role": "system", "content": PLANNER_SYSTEM}, {"role": "user", "content": self._user("")}],
             )
-            if plan is None:
-                return self._finish(None, None)
+            if plan is not None:
+                goals = [step["goal"] for step in plan["steps"]]
+                plan_text = "Plan:\n" + "\n".join(f"- {goal}" for goal in goals)
         review = None
         pytest_result = None
         critic_payload = None
         revises = 0
         while self.n_steps < MAX_TURNS:
-            extra = self.feedback
             edits = self._complete(
                 "coder",
                 [
                     {"role": "system", "content": SINGLE_SYSTEM if self.single else CODER_SYSTEM},
-                    {"role": "user", "content": self._user(extra)},
+                    {"role": "user", "content": self._user(self._coder_extra(plan_text))},
                 ],
             )
             if edits is None or self.workspace is None:
                 break
-            apply_edits(self.workspace, edits["edits"])
+            placed = [_place_edit(self.workspace, edit, self.before) for edit in edits["edits"]]
+            apply_edits(self.workspace, placed)
             diff = self._diff()
-            self._event("coder", "edit", step=self.n_steps, diff=diff, paths=[item["path"] for item in edits["edits"]])
+            self._event("coder", "edit", step=self.n_steps, diff=diff, paths=[item["path"] for item in placed])
             pytest_result = self._pytest()
             self._event(
                 "test_runner",
@@ -248,37 +378,21 @@ class CodeRun:
             self._event("reviewer", "review", step=self.n_steps, verdict=review["verdict"], reason=review["reason"])
             if self.single:
                 break
-            stop_for_tests = touches_tests(diff)
-            if review["verdict"] == "accept" or stop_for_tests or revises >= MAX_CRITIC_RETRIES:
-                critic_payload = self._complete(
-                    "critic",
-                    [
-                        {"role": "system", "content": CRITIC_SYSTEM},
-                        {"role": "user", "content": self._user(self._critic_note(pytest_result))},
-                    ],
-                )
-                if critic_payload and critic_payload["verdict"] == "revise" and not stop_for_tests and review["verdict"] != "accept":
-                    revises += 1
-                    self._event("critic", "revise", step=self.n_steps, reason=critic_payload["reason"])
-                    self.feedback = critic_payload["reason"]
-                    if revises > MAX_CRITIC_RETRIES:
-                        break
-                    continue
+            if review["verdict"] == "accept" or touches_tests(diff):
+                critic_payload = self._ask_critic(pytest_result)
                 break
-            critic_payload = self._complete(
-                "critic",
-                [
-                    {"role": "system", "content": CRITIC_SYSTEM},
-                    {"role": "user", "content": self._user(self._critic_note(pytest_result))},
-                ],
-            )
-            if critic_payload is None or critic_payload["verdict"] == "accept":
+            if self.n_steps < MAX_TURNS:
+                critic_payload = self._ask_critic(pytest_result)
+            if revises >= MAX_CRITIC_RETRIES:
                 break
             revises += 1
-            self._event("critic", "revise", step=self.n_steps, reason=critic_payload["reason"])
-            self.feedback = critic_payload["reason"]
-            if revises > MAX_CRITIC_RETRIES:
-                break
+            reason = "Tests failed."
+            if critic_payload and critic_payload.get("verdict") == "revise":
+                reason = critic_payload["reason"]
+            self._event("critic", "revise", step=self.n_steps, reason=reason)
+            self.feedback = self._critic_note(pytest_result)
+            if critic_payload and critic_payload.get("verdict") == "revise":
+                self.feedback = f"{self.feedback}\n\nCritic: {critic_payload['reason']}"
         self._last_critic = critic_payload
         return self._finish(review, pytest_result)
 

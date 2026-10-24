@@ -1,0 +1,1 @@
+last_n(items, n) returns the last n items. n less than 1 returns an empty list. The visible test is the spec. Do not edit tests.

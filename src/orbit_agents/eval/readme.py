@@ -320,9 +320,17 @@ CODE_CONFIGS = (
     ("team", "Team with reviewer"),
 )
 
+_V1_SUPERSEDED = (
+    "The earlier split `code-eval-v1` was scored and is superseded. "
+    "The team pipeline refused a task when the planner reply failed the schema, "
+    "and a critic accept stopped a red build before the coder could revise. "
+    "Those files stay at `results/code/claude-haiku-5-5/` as the record of that run. "
+    "They are not the current score."
+)
+
 
 def _measured_code(payload: dict | None) -> bool:
-    return _measured(payload) and payload.get("protocol") == "code-eval-v1"
+    return _measured(payload) and payload.get("protocol") == "code-eval-v2"
 
 
 def _code_cells(payload: dict) -> tuple[str, str]:
@@ -338,15 +346,19 @@ def _code_cells(payload: dict) -> tuple[str, str]:
 
 
 def _code(root: Path) -> list[str]:
-    """Orbit Code rows. Pending slots have no number."""
+    """Orbit Code rows for code-eval-v2. Pending slots have no number.
+
+    The code-eval-v1 files under results/code/ are a superseded record. This block
+    does not copy their pass rates.
+    """
     lines = [
-        "Orbit Code, frozen split `code-eval-v1`. A row is filled only from a measured file under `results/code/`. "
+        "Orbit Code, frozen split `code-eval-v2`. A row is filled only from a measured file under `results/code_v2/`. "
         "Anything else is pending, not scored.",
         "",
         "| Config | Model | pass@1 | Tests-passed rate | Reviewer rejections | Tokens | Cost USD |",
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
-    folder = root / "results" / "code"
+    folder = root / "results" / "code_v2"
     measured: list[dict] = []
     if folder.is_dir():
         for model_dir in sorted(path for path in folder.iterdir() if path.is_dir()):
@@ -362,6 +374,7 @@ def _code(root: Path) -> list[str]:
                 "| Single agent, local Qwen | pending | pending, not scored | | | | |",
             ]
         )
+        lines.extend(["", _V1_SUPERSEDED])
         return lines
     for payload in measured:
         tokens, cost = _code_cells(payload)
@@ -382,6 +395,7 @@ def _code(root: Path) -> list[str]:
         lines.append("| Team with reviewer | pending | pending, not scored | | | | |")
     if not have_qwen:
         lines.append("| Single agent, local Qwen | pending | pending, not scored | | | | |")
+    lines.extend(["", _V1_SUPERSEDED])
     return lines
 
 

@@ -1,0 +1,1 @@
+charge adds tax_cents once. tax_cents(price_cents, rate_bps) rounds half up to the nearest cent. rate_bps is basis points, so 10000 is 100 percent. Do not edit tests.

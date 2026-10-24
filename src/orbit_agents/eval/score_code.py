@@ -6,10 +6,11 @@
 Dry-run prints the request bound and the cost cap. It does not read a key and
 it does not write a file. A measured file is never overwritten.
 
-Results go to results/code/<model>/<config>.json with pass@1, the hidden-test
-pass rate, reviewer rejections, tokens, and cost. The test runner and the
-reviewer are code, so they do not spend a model request. Transport retries,
-including the read-timeout retry, are the distillation client's.
+Results for code-eval-v2 go to results/code_v2/<model>/<config>.json. The
+superseded code-eval-v1 record stays in results/code/<model>/<config>.json and
+is not overwritten. The test runner and the reviewer are code, so they do not
+spend a model request. Transport retries, including the read-timeout retry,
+are the distillation client's.
 """
 
 from __future__ import annotations
@@ -21,14 +22,13 @@ from pathlib import Path
 
 from orbit_agents.code_sandbox import run_pytest
 from orbit_agents.code_team import run_code_single, run_code_team
-from orbit_agents.codebench import PROTOCOL, load_tasks, repos_path, verify_benchmark
+from orbit_agents.codebench import PROTOCOL, PROTOCOL_V2, load_tasks, repos_path, split_spec, verify_benchmark
 from orbit_agents.engine import MAX_CRITIC_RETRIES, MAX_SCHEMA_TRIES
 from orbit_agents.eval.score_team import DEFAULT_MAX_COST_USD, RETRIES_PER_REQUEST, is_measured
 from orbit_agents.paths import ROOT
 from orbit_agents.policy import make_policy
 
 CONFIGS = {"single": "Single agent", "team": "Team with reviewer"}
-CODE_RESULTS = Path("results") / "code"
 
 
 def request_bound(n_tasks: int, config: str) -> dict:
@@ -66,8 +66,8 @@ def model_dir_name(model: str) -> str:
     return slug
 
 
-def output_path(root: Path, config: str, model: str) -> Path:
-    return root / CODE_RESULTS / model_dir_name(model) / f"{config}.json"
+def output_path(root: Path, config: str, model: str, protocol: str = PROTOCOL_V2) -> Path:
+    return root / split_spec(protocol)["results"] / model_dir_name(model) / f"{config}.json"
 
 
 def _price(model: str) -> tuple[dict, str]:
@@ -83,7 +83,7 @@ def _hidden_rate(task: dict, workspace: Path, root: Path) -> dict:
     if scratch.exists():
         shutil.rmtree(scratch)
     shutil.copytree(workspace, scratch)
-    hidden_src = repos_path(root) / task["repo"] / "hidden"
+    hidden_src = repos_path(root, task.get("protocol") or PROTOCOL) / task["repo"] / "hidden"
     dest = scratch / "hidden_tests"
     shutil.copytree(hidden_src, dest)
     result = run_pytest(scratch, select="hidden_tests")
@@ -137,6 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--requests-per-minute", type=float, default=None)
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--split", choices=(PROTOCOL_V2, PROTOCOL), default=PROTOCOL_V2)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--dry-run", action="store_true", help="Print the request bound and cost cap. No key and no file.")
     return parser
@@ -145,15 +146,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, *, policy=None) -> dict:
     """Score one config once, unless that file is already measured."""
     args = build_parser().parse_args(argv)
-    frozen = verify_benchmark(args.root)
-    tasks = load_tasks(args.root)
+    frozen = verify_benchmark(args.root, args.split)
+    tasks = load_tasks(args.root, args.split)
     if any(task.get("split") != "test" for task in tasks):
         raise SystemExit("code benchmark tasks must use the test split")
     bound = request_bound(len(tasks), args.config)
     max_requests = args.max_requests or bound["hard_cap"]
     if max_requests < 1 or args.max_cost_usd < 0:
         raise SystemExit("--max-requests must be at least 1 and --max-cost-usd zero or more")
-    out = output_path(args.root, args.config, args.model)
+    out = output_path(args.root, args.config, args.model, args.split)
     price = None
     price_source = None
     if args.provider == "anthropic":
@@ -229,7 +230,7 @@ def _base(args, frozen: dict, max_requests: int, kwargs: dict, policy) -> dict:
     return {
         "kind": "model_eval",
         "split": "test",
-        "protocol": PROTOCOL,
+        "protocol": frozen["protocol"],
         "split_tag": frozen["split_tag"],
         "bundle_sha256": frozen["bundle_sha256"],
         "config": args.config,

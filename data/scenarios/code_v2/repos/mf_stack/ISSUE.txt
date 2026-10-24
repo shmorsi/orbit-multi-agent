@@ -1,0 +1,1 @@
+Stack.pop returns the most recently pushed item. drain returns that item for a one-item stack. Do not edit tests.

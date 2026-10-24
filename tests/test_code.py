@@ -1,5 +1,7 @@
 """Orbit Code sandbox, frozen manifest, scorer, and scripted trace."""
 
+import difflib
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -7,8 +9,16 @@ from pathlib import Path
 import pytest
 
 from orbit_agents.code_sandbox import review_patch, run_pytest, touches_tests
-from orbit_agents.code_team import run_code_single
-from orbit_agents.codebench import load_tasks, materialize, read_variant, task_by_id, task_prompt, verify_benchmark
+from orbit_agents.code_team import run_code_single, run_code_team
+from orbit_agents.codebench import (
+    PROTOCOL_V2,
+    load_tasks,
+    materialize,
+    read_variant,
+    task_by_id,
+    task_prompt,
+    verify_benchmark,
+)
 from orbit_agents.eval.score_code import main, request_bound
 from orbit_agents.policy import LLMClient
 from orbit_agents.scripted_code import ScriptedCodePolicy
@@ -75,6 +85,7 @@ def test_manifest_hash_matches_and_a_change_is_refused(tmp_path):
     frozen = verify_benchmark()
     manifest = json.loads(Path("data/scenarios/code/manifest.json").read_text(encoding="utf-8"))
     assert frozen["bundle_sha256"] == manifest["bundle_sha256"]
+    assert frozen["bundle_sha256"] == "18665421458c6661299b60c1aa982394c9d3b773660a16bb3d7066f090a7028f"
     assert frozen["split_tag"] == "code-eval-v1"
     assert manifest["n_tasks"] == len(load_tasks())
     root = tmp_path / "repo"
@@ -142,13 +153,20 @@ def test_score_dry_run_prints_the_bound_and_writes_nothing():
     plan = main(["--config", "team", "--model", "claude-haiku-5-5", "--dry-run"])
     after = sorted(path.relative_to("results") for path in Path("results").rglob("*") if path.is_file())
     assert after == before
+    n_tasks = len(load_tasks(protocol=PROTOCOL_V2))
     assert plan["max_cost_usd"] == 5.0
-    assert plan["requests"] == request_bound(len(load_tasks()), "team")
-    assert plan["requests"]["hard_cap"] > request_bound(len(load_tasks()), "single")["hard_cap"]
+    assert plan["frozen_test"]["protocol"] == PROTOCOL_V2
+    assert plan["out"] == "results/code_v2/claude-haiku-5-5/team.json"
+    assert plan["requests"] == request_bound(n_tasks, "team")
+    assert plan["requests"]["hard_cap"] > request_bound(n_tasks, "single")["hard_cap"]
     assert plan["price_usd_per_million"]["input"] > 0
     assert plan["price_source"] == "table"
     assert plan["already_measured"] is False
     assert "read timeout" in plan["requests"]["note"]
+    single = main(["--config", "single", "--model", "claude-haiku-5-5", "--dry-run"])
+    assert single["requests"] == request_bound(n_tasks, "single")
+    assert single["max_cost_usd"] == 5.0
+    assert single["out"] == "results/code_v2/claude-haiku-5-5/single.json"
 
 
 def test_scorer_refuses_to_overwrite_a_measured_file(tmp_path):
@@ -158,7 +176,19 @@ def test_scorer_refuses_to_overwrite_a_measured_file(tmp_path):
     out.parent.mkdir(parents=True)
     out.write_text(json.dumps({"status": "measured", "kind": "model_eval"}) + "\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="already measured"):
-        main(["--config", "team", "--model", "claude-haiku-5-5", "--root", str(root), "--dry-run"])
+        main(
+            [
+                "--config",
+                "team",
+                "--model",
+                "claude-haiku-5-5",
+                "--split",
+                "code-eval-v1",
+                "--root",
+                str(root),
+                "--dry-run",
+            ]
+        )
 
 
 def test_scripted_traces_show_the_repair_and_the_test_edit_rejection(tmp_path):
@@ -206,3 +236,152 @@ def test_mission_control_lists_the_code_scenario():
     assert "traces/code/index.json" in script
     assert "Orbit Code" in script
     assert "Orbit Boardroom" in script
+    assert "code-eval-v2" in html
+
+
+class _Script(LLMClient):
+    """One JSON object per role. The replies are fixed, so the loop can be tested offline."""
+
+    provider = "fake"
+    stops = ()
+
+    def __init__(self, replies):
+        self.replies = replies
+        self.roles = []
+        self.users = []
+
+    def complete_text(self, messages, schema, *, role):
+        del schema
+        self.roles.append(role)
+        self.users.append(messages[-1]["content"])
+        reply = self.replies[role]
+        if callable(reply):
+            return reply(self, messages)
+        return reply
+
+
+def test_planner_extra_fields_do_not_skip_the_coder(tmp_path):
+    task = task_by_id("sum-inclusive")
+    oracle = read_variant(task, "oracle")
+    policy = _Script(
+        {
+            "planner": json.dumps({"steps": [{"goal": "Fix the source. " + ("x" * 240), "file": "x.py"}], "note": "extra"}),
+            "coder": json.dumps({"edits": [{"path": task["entry"], "content": oracle, "why": "fix"}]}),
+            "critic": json.dumps({"verdict": "accept", "reason": "Ship it."}),
+        }
+    )
+    result = run_code_team(task, policy, tmp_path)
+    assert "coder" in policy.roles
+    assert result.status == "answer"
+    assert policy.roles.count("planner") == 1
+
+
+def test_a_dead_planner_still_reaches_the_coder(tmp_path):
+    task = task_by_id("sum-inclusive")
+    oracle = read_variant(task, "oracle")
+    policy = _Script(
+        {
+            "planner": json.dumps({"steps": "not-a-list"}),
+            "coder": json.dumps({"edits": [{"path": task["entry"], "content": oracle}]}),
+            "critic": json.dumps({"verdict": "accept", "reason": "Ship it."}),
+        }
+    )
+    result = run_code_team(task, policy, tmp_path)
+    assert policy.roles.count("coder") == 1
+    assert result.status == "answer"
+
+
+def test_schema_repair_names_the_failed_check(tmp_path):
+    task = task_by_id("sum-inclusive")
+    oracle = read_variant(task, "oracle")
+    calls = {"planner": 0}
+
+    def planner(_policy, _messages):
+        calls["planner"] += 1
+        if calls["planner"] == 1:
+            return json.dumps({"steps": "not-a-list"})
+        return json.dumps({"steps": [{"goal": "Fix the source."}]})
+
+    policy = _Script(
+        {
+            "planner": planner,
+            "coder": json.dumps({"edits": [{"path": task["entry"], "content": oracle}]}),
+            "critic": json.dumps({"verdict": "accept", "reason": "Ship it."}),
+        }
+    )
+    result = run_code_team(task, policy, tmp_path)
+    planner_users = [text for role, text in zip(policy.roles, policy.users, strict=True) if role == "planner"]
+    assert "Validator says" in planner_users[1]
+    assert result.status == "answer"
+
+
+def test_critic_accept_on_a_red_build_still_revises(tmp_path):
+    task = task_by_id("sum-inclusive")
+    wrong = read_variant(task, "wrong")
+    oracle = read_variant(task, "oracle")
+    calls = {"coder": 0}
+
+    def coder(policy, _messages):
+        calls["coder"] += 1
+        content = oracle if calls["coder"] > 1 and "Tests failed." in policy.users[-1] else wrong
+        return json.dumps({"edits": [{"path": task["entry"], "content": content}]})
+
+    policy = _Script(
+        {
+            "planner": json.dumps({"steps": [{"goal": "Fix the source."}]}),
+            "coder": coder,
+            "critic": json.dumps({"verdict": "accept", "reason": "Ship it."}),
+        }
+    )
+    result = run_code_team(task, policy, tmp_path)
+    assert calls["coder"] == 2
+    assert result.status == "answer"
+    assert any(event["kind"] == "revise" for event in result.events)
+
+
+def test_a_test_edit_is_not_revised_into_a_pass(tmp_path):
+    task = task_by_id("sum-inclusive")
+    policy = ScriptedCodePolicy(task, mode="tamper")
+    result = run_code_team(task, policy, tmp_path)
+    assert result.status == "refuse"
+    assert policy.coder_calls == 1
+    assert any(event["kind"] == "review" and event["verdict"] == "reject" for event in result.events)
+
+
+def test_unified_diff_and_a_nested_path_patch_the_tree(tmp_path):
+    task = task_by_id("sum-inclusive")
+    original = Path("data/scenarios/code/repos/sum_inclusive/sum_inclusive.py").read_text(encoding="utf-8")
+    oracle = read_variant(task, "oracle")
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            oracle.splitlines(keepends=True),
+            fromfile="a/nested/sum_inclusive.py",
+            tofile="b/nested/sum_inclusive.py",
+        )
+    )
+    policy = _Script(
+        {
+            "coder": json.dumps({"edits": [{"path": "nested/sum_inclusive.py", "content": diff}]}),
+            "critic": json.dumps({"verdict": "accept", "reason": "Ship it."}),
+        }
+    )
+    result = run_code_single(task, policy, tmp_path)
+    assert result.status == "answer"
+    assert (tmp_path / "repo" / "sum_inclusive.py").read_text(encoding="utf-8") == oracle
+
+
+def test_v1_score_files_are_not_overwritten_or_rewritten():
+    expected = {
+        "single.json": "372bbe9e38b3b58357463e765e11dcf742d5e91ecc513478c230e31690ab4c90",
+        "team.json": "f67038e781dff027bb3de704e0df193c65d52faa04ec7ef6dffb0dc1a916efb8",
+    }
+    for name, digest in expected.items():
+        body = (Path("results/code/claude-haiku-5-5") / name).read_bytes()
+        assert hashlib.sha256(body).hexdigest() == digest
+    before = {name: (Path("results/code/claude-haiku-5-5") / name).read_bytes() for name in expected}
+    for config in ("single", "team"):
+        with pytest.raises(SystemExit, match="already measured"):
+            main(["--config", config, "--model", "claude-haiku-5-5", "--split", "code-eval-v1", "--dry-run"])
+    after = {name: (Path("results/code/claude-haiku-5-5") / name).read_bytes() for name in expected}
+    assert after == before

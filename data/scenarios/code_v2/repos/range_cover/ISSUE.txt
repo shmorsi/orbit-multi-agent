@@ -1,0 +1,1 @@
+covers(start, end, point) is true when point is inside the closed interval from start to end, including both ends. Do not edit tests.

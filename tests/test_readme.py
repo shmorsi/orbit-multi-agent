@@ -58,6 +58,8 @@ def test_readme_numbers_come_from_committed_files():
     result_files.extend(Path("results/v2_qwen1.5b").glob("*.json"))
     result_files.extend(Path("results/v3_qwen1.5b").glob("*.json"))
     result_files.extend(Path("results/v3_api").glob("*/*.json"))
+    result_files.extend(Path("results/code").glob("*/*.json"))
+    result_files.extend(Path("results/code_v2").glob("*/*.json"))
     for path in result_files:
         result_numbers |= _json_numbers(path)
     allowed_outside = set(result_numbers)
@@ -68,6 +70,7 @@ def test_readme_numbers_come_from_committed_files():
         Path("finetune/data/manifest.json"),
         Path("finetune/configs/qlora_distill.json"),
         Path("data/scenarios/code/manifest.json"),
+        Path("data/scenarios/code_v2/manifest.json"),
         Path("data/scenarios/boardroom/manifest.json"),
     ):
         allowed_outside |= _json_numbers(path)
@@ -94,6 +97,12 @@ def test_results_block_matches_the_generator():
     assert updated_readme() == readme, "run python -m orbit_agents.eval.readme"
     assert "| Team distill | not scored | | | |" in render()
     assert "pending" in render()
+    assert "code-eval-v2" in render()
+    assert "superseded" in render()
+    assert "| Single agent | pending | pending, not scored | | | | |" in render()
+    readme_body = Path("README.md").read_text(encoding="utf-8")
+    for banned in ("4 of 16", "12 of 16", "16 of 16"):
+        assert banned not in readme_body
     assert "QLoRA on a T4" in render()
     assert "task-success gain" not in render()
     assert "task-success gain" not in readme.lower()

@@ -1,0 +1,1 @@
+window_means returns the mean of every contiguous window of the given size. Do not edit tests.

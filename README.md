@@ -12,20 +12,22 @@ A team of AI agents that fixes real code and refuses to ship a patch that fails 
   <img src="docs/orbit-code.gif" alt="Orbit Code replay. A scripted demo, not a score. The planner writes the fix, the coder edits a sandbox, the tests go from failed to passed, and the reviewer accepts the patch.">
 </p>
 
-The clip is a scripted demo. It follows an oracle on a toy bug. It is not a model score. The code benchmark has not been scored.
+The clip is a scripted demo. It follows an oracle on a toy bug. It is not a model score. The current split, `code-eval-v2`, is pending, not scored. An earlier split was measured and is superseded: the team pipeline stopped when the planner reply failed the schema, and a critic accept ended a red build before the coder could revise. That record stays in `results/code/claude-haiku-5-5/`.
 
 ## Key results
 
 <!-- RESULTS_START -->
 Rates, losses, and intervals below are the committed values, shown to three decimal places. The JSON files hold the full values.
 
-Orbit Code, frozen split `code-eval-v1`. A row is filled only from a measured file under `results/code/`. Anything else is pending, not scored.
+Orbit Code, frozen split `code-eval-v2`. A row is filled only from a measured file under `results/code_v2/`. Anything else is pending, not scored.
 
 | Config | Model | pass@1 | Tests-passed rate | Reviewer rejections | Tokens | Cost USD |
 | --- | --- | --- | --- | --- | --- | --- |
 | Single agent | pending | pending, not scored | | | | |
 | Team with reviewer | pending | pending, not scored | | | | |
 | Single agent, local Qwen | pending | pending, not scored | | | | |
+
+The earlier split `code-eval-v1` was scored and is superseded. The team pipeline refused a task when the planner reply failed the schema, and a critic accept stopped a red build before the coder could revise. Those files stay at `results/code/claude-haiku-5-5/` as the record of that run. They are not the current score.
 
 Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, 307 train dialogues and 71 tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went from 1.152 at step 10 to 0.051 at step 150. Task success did not clear zero.
 
@@ -86,7 +88,7 @@ flowchart LR
 
 Planner, coder, test runner, reviewer. The coder edits a temp workspace. The test runner executes pytest there with a timeout and no network. The reviewer rejects a patch whose tests fail or whose diff touches the tests. A critic can send the coder back. A grounding gate drops a "tests passed" claim the run does not support.
 
-The frozen split is `data/scenarios/code/`, protocol `code-eval-v1`, with hidden tests the prompt never sees. `python -m orbit_agents.eval.score_code` checks the manifest hash and, when the git tag exists, the tag. It refuses to overwrite a measured file.
+The frozen split to score is `data/scenarios/code_v2/`, protocol `code-eval-v2`, with hidden tests the prompt never sees. `python -m orbit_agents.eval.score_code` checks that manifest hash and, when the git tag exists, the tag. It refuses to overwrite a measured file. `data/scenarios/code/` is the earlier split. Its measured files under `results/code/claude-haiku-5-5/` stay as the record of a run the team harness invalidated. They are not the current score.
 
 | Config | What runs |
 | --- | --- |
@@ -110,7 +112,7 @@ python -m orbit_agents.eval.score_code --config single --provider anthropic --mo
 python -m orbit_agents.eval.readme
 ```
 
-Those commands write `results/code/<model>/team.json` and `results/code/<model>/single.json`. Until those files are measured, the table above says pending, not scored. This checkout does not contain an API key, so those rows are pending.
+Those commands write `results/code_v2/<model>/team.json` and `results/code_v2/<model>/single.json`. Until those files are measured, the table above says pending, not scored. This checkout does not contain an API key, so those rows are pending. A `code-eval-v1` file that is already measured is left in place.
 
 `make traces-code` rewrites the scripted Mission Control traces: one repair, and one patch the reviewer rejects because it edits a test.
 
@@ -288,7 +290,7 @@ make score-v3 MODEL=claude-haiku-5-5
 
 Future work, not a claim about a result:
 
-- Score Orbit Code once with `make score-code` and let the generator fill the pass@1 row. Dry-run first. It prints the request bound and the cost cap.
+- Score Orbit Code on `code-eval-v2` once with `make score-code` and let the generator fill the pass@1 row. Dry-run first. It prints the request bound and the cost cap.
 - Score the round table once with `make score-v3` and let the generator add that row. The three-role and six-role API scores are already measured.
 - Run the distill notebook once on a Colab T4, score team distill under harness v3, and commit only `results/v3_qwen1.5b/*.json` and `README.md`.
 - Keep the archived v2 numbers in `results/v2_qwen1.5b/` and do not compare them with a v3 score.
@@ -296,7 +298,7 @@ Future work, not a claim about a result:
 
 ## Limitations
 
-- Orbit Code has not been scored. The lead clip is a scripted demo. The coder returns full file contents for short modules. It is not a repo-scale software engineer.
+- Orbit Code on `code-eval-v2` is pending, not scored. The lead clip is a scripted demo. The coder returns full file contents for short modules. It is not a repo-scale software engineer. The earlier split is superseded because the team harness stopped a red build before the coder could revise, and that record is not the current score.
 - The Boardroom clip is a scripted demo on fictional files. It is not a score and it is not advice.
 - The frozen test is 12 tasks, 2 of them traps. One task moves a rate by a twelfth, so only large effects can clear zero.
 - Each model was trained once and scored once. There is no seed sweep.

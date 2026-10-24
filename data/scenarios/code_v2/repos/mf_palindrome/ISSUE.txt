@@ -1,0 +1,1 @@
+phrase_is_palindrome ignores case, spaces, and punctuation. Only letters and digits count. Do not edit tests.

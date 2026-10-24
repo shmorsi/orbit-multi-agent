@@ -1,0 +1,1 @@
+normalize lowercases the address and drops a +tag from the local part. Do not edit tests.
