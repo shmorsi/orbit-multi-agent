@@ -44,9 +44,20 @@ The adapter's two answerable successes sit next to a missed trap: correct refusa
 
 The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were 2 of 12, 2 of 12, then 1 of 12, with schema-valid rates 0.000, 0.071, and 0.613. Logged loss went from 1.319 to 0.200. Its task-success interval also failed to clear zero. Fine-tuning taught the format.
 
-The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config. It has not been scored.
+The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check of the scripted tools, not a model score. Team distill is a fourth config, scored only under harness v3 below.
 
-The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison. Those v3 scores are not in yet.
+The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, team_lora, and team_distill were scored again on the frozen test under v3. Compare those four runs with each other. Do not compare them with the archived v2 numbers.
+
+Harness v3, frozen test `team-eval-v1`, each run scored once. Files: `results/v3_qwen1.5b/`. This table is not a comparison with the archived v2 numbers.
+
+| Run | Successes | Task-success rate | Schema-valid rate | Trap refusals |
+| --- | --- | --- | --- | --- |
+| Single base | 2 of 12 | 0.167 | 1.000 | 2 of 2 |
+| Team base | 2 of 12 | 0.167 | 0.333 | 2 of 2 |
+| Team plus adapter | 4 of 12 | 0.333 | 0.764 | 1 of 2 |
+| Team distill | 2 of 12 | 0.167 | 0.448 | 2 of 2 |
+
+The paired bootstrap for task success, team base minus single base, is 0.000 to 0.000 (point 0.000). That interval includes zero, so the difference is not significant. Its schema-valid interval is -0.844 to -0.490 (point -0.667). That interval excludes zero and is below zero. The paired bootstrap for task success, team plus adapter minus single base, is -0.167 to 0.500 (point 0.167). That interval includes zero, so the difference is not significant. Its schema-valid interval is -0.311 to -0.186 (point -0.236). That interval excludes zero and is below zero. The paired bootstrap for task success, team plus adapter minus team base, is -0.167 to 0.500 (point 0.167). That interval includes zero, so the difference is not significant. Its schema-valid interval is 0.264 to 0.607 (point 0.431). That interval excludes zero and is above zero. The paired bootstrap for task success, team distill minus single base, is 0.000 to 0.000 (point 0.000). That interval includes zero, so the difference is not significant. Its schema-valid interval is -0.642 to -0.437 (point -0.552). That interval excludes zero and is below zero. The paired bootstrap for task success, team distill minus team base, is 0.000 to 0.000 (point 0.000). That interval includes zero, so the difference is not significant. Its schema-valid interval is -0.064 to 0.278 (point 0.115). That interval includes zero, so the difference is not significant. The paired bootstrap for task success, team distill minus team plus adapter, is -0.500 to 0.167 (point -0.167). That interval includes zero, so the difference is not significant. Its schema-valid interval is -0.401 to -0.209 (point -0.316). That interval excludes zero and is below zero.
 
 The round-table team is not scored.
 
@@ -60,14 +71,10 @@ API policy `claude-haiku-5-5`, harness v3, frozen test `team-eval-v1`, each team
 
 The paired bootstrap for task success, v2 team minus v1 team, is -0.250 to 0.000 (point -0.083). That interval includes zero. Its schema-valid interval is -0.425 to -0.174 (point -0.303). That interval is below zero.
 
-Pending slots. A row here is not a result. The round table and the QLoRA distill run on a T4 stay here until a measured file exists. The v3 rescores of the archived runs stay here for the same reason.
+Pending slots. A row here is not a result. The round table stays here until a measured file exists.
 
 | Slot | File | Status |
 | --- | --- | --- |
-| Single base, harness v3 | `results/v3_qwen1.5b/single_base.json` | pending |
-| Team base, harness v3 | `results/v3_qwen1.5b/team_base.json` | pending |
-| Team plus adapter, harness v3 | `results/v3_qwen1.5b/team_lora.json` | pending |
-| Team distill, QLoRA on a T4, harness v3 | `results/v3_qwen1.5b/team_distill.json` | pending |
 | Claude policy, round table, harness v3 | `results/v3_api/<model>/team_v3.json` | pending |
 <!-- RESULTS_END -->
 
@@ -292,8 +299,7 @@ Future work, not a claim about a result:
 
 - Score Orbit Code on `code-eval-v2` once with `make score-code` and let the generator fill the pass@1 row. Dry-run first. It prints the request bound and the cost cap.
 - Score the round table once with `make score-v3` and let the generator add that row. The three-role and six-role API scores are already measured.
-- Run the distill notebook once on a Colab T4, score team distill under harness v3, and commit only `results/v3_qwen1.5b/*.json` and `README.md`.
-- Keep the archived v2 numbers in `results/v2_qwen1.5b/` and do not compare them with a v3 score.
+- Keep the archived v2 numbers in `results/v2_qwen1.5b/`. The harness-v3 rescore, including team distill, is a separate table.
 - Train more than one seed before talking about a distribution. This page has one training run per config.
 
 ## Limitations
@@ -303,8 +309,8 @@ Future work, not a claim about a result:
 - The frozen test is 12 tasks, 2 of them traps. One task moves a rate by a twelfth, so only large effects can clear zero.
 - Each model was trained once and scored once. There is no seed sweep.
 - The adapter that added a success also missed a trap: correct refusals went from 2 to 1.
-- The harness changed in v3. The archived Qwen numbers are not compared with a harness-v3 rescore of those runs. Those Qwen rescores are not in yet.
-- Team distill has not been scored. The notebook below is the path to that one score.
+- The harness changed in v3. The archived Qwen numbers stay in their own table. The harness-v3 rescore is in Key results. A task-success interval that includes zero is not a significant difference.
+- Team distill is scored under harness v3. The notebook below is how that run was produced.
 - The six-role API score is in Key results. The traces in `mission/traces/v2/` still come from the scripted harness, which follows each task's oracle; they show the protocol, separate from that score.
 - The round-table team has not been scored. Its traces in `mission/traces/v3/` are the same kind of harness replay.
 - The free-T4 wall clock for training plus scoring has not been measured.
@@ -394,7 +400,7 @@ The Windows device is `cpu`. The Python tool still dies after one second; the li
 
 ### What you should see
 
-Mission Control shows the planner, the worker, a tool call in the telemetry strip, and the critic. The phase rail steps Planner, Worker, Tool, Critic. The Trace menu also lists the six-role traces under Team v2; choosing one switches the ring to those six seats and the rail to Commander, Specialist, Tool, Critic, and Auditor. Under the replay, the flight-data wall charts the frozen 1.5B runs with bootstrap intervals, the loss curve, the trap outcomes, and an empty slot for team distill. The T+ column is a replay clock, not measured latency.
+Mission Control shows the planner, the worker, a tool call in the telemetry strip, and the critic. The phase rail steps Planner, Worker, Tool, Critic. The Trace menu also lists the six-role traces under Team v2; choosing one switches the ring to those six seats and the rail to Commander, Specialist, Tool, Critic, and Auditor. Under the replay, the flight-data wall charts the archived v2 1.5B run with bootstrap intervals, the loss curve, the trap outcomes, and an empty slot for team distill. The harness-v3 scores, including team distill, are in Key results. The T+ column is a replay clock, not measured latency.
 
 `mission/index.html` is static. GitHub Pages can host the `mission` directory, and the same files open under `make demo`. The run form needs the local server. `prefers-reduced-motion` turns the pulses off.
 

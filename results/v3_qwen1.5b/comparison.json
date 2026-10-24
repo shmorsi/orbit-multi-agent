@@ -1,0 +1,200 @@
+{
+  "status": "measured",
+  "kind": "comparison",
+  "n_resamples": 10000,
+  "seed": 0,
+  "pairs": {
+    "team_base_minus_single_base": {
+      "task_success_rate": {
+        "point": 0.0,
+        "low": 0.0,
+        "high": 0.0,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": 5.666666666666667,
+        "low": 5.0,
+        "high": 6.333333333333333,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": -0.6666666666666666,
+        "low": -0.84375,
+        "high": -0.4895833333333333,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    },
+    "team_lora_minus_team_base": {
+      "task_success_rate": {
+        "point": 0.16666666666666666,
+        "low": -0.16666666666666666,
+        "high": 0.5,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": -1.3333333333333333,
+        "low": -1.9166666666666667,
+        "high": -0.6666666666666666,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": 0.4305555555555556,
+        "low": 0.2638888888888889,
+        "high": 0.6069444444444444,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    },
+    "team_lora_minus_single_base": {
+      "task_success_rate": {
+        "point": 0.16666666666666666,
+        "low": -0.16666666666666666,
+        "high": 0.5,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": 4.333333333333333,
+        "low": 4.083333333333333,
+        "high": 4.583333333333333,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": -0.23611111111111108,
+        "low": -0.3111111111111111,
+        "high": -0.1861111111111111,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    },
+    "team_distill_minus_team_base": {
+      "task_success_rate": {
+        "point": 0.0,
+        "low": 0.0,
+        "high": 0.0,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": -0.5,
+        "low": -1.4166666666666667,
+        "high": 0.5,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": 0.11498015873015872,
+        "low": -0.06448412698412702,
+        "high": 0.27777777777777773,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    },
+    "team_distill_minus_team_lora": {
+      "task_success_rate": {
+        "point": -0.16666666666666666,
+        "low": -0.5,
+        "high": 0.16666666666666666,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": 0.8333333333333334,
+        "low": 0.25,
+        "high": 1.5,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": -0.31557539682539687,
+        "low": -0.40069444444444446,
+        "high": -0.20932539682539686,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    },
+    "team_distill_minus_single_base": {
+      "task_success_rate": {
+        "point": 0.0,
+        "low": 0.0,
+        "high": 0.0,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "mean_steps": {
+        "point": 5.166666666666667,
+        "low": 4.5,
+        "high": 5.833333333333333,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      },
+      "schema_valid_rate": {
+        "point": -0.551686507936508,
+        "low": -0.642361111111111,
+        "high": -0.4374007936507937,
+        "n": 12,
+        "n_resamples": 10000,
+        "seed": 0,
+        "alpha": 0.05,
+        "method": "paired_percentile_bootstrap"
+      }
+    }
+  }
+}

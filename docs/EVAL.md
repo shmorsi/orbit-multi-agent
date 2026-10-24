@@ -16,7 +16,7 @@ A scripted run has `kind: system_check`. It proves the tools and the gate. It is
 
 ## Two uses of the name v3
 
-Harness v3 is the tool and gate change: search lists tables and logs, python can read a bundled file by path, and the critic must return one JSON object. Scores for that harness would be `results/v3_qwen1.5b/`. They are not in yet, so no difference from the archived v2 numbers is claimed.
+Harness v3 is the tool and gate change: search lists tables and logs, python can read a bundled file by path, and the critic must return one JSON object. Those scores are `results/v3_qwen1.5b/`. The README block reads them, including the paired intervals in `comparison.json`. A task-success interval that includes zero is not a significant difference. That table is separate from the archived v2 numbers.
 
 The round table is a separate team. It adds a coordinator, a researcher, a red team, and a verifier on top of the six-role crew. Its score would be `results/v3_api/<model>/team_v3.json`, written once by `make score-v3`. Until that file is measured, the README says the round-table team is not scored.
 

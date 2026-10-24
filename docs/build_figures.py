@@ -260,7 +260,7 @@ def hero_svg(root: Path = ROOT) -> str:
             f"Task success {facts['base_success']} to {facts['lora_success']}, {facts['success_phrase']}. "
             f"Model {facts['model']}. API task success {api['v1_success']} to {api['v2_success']}, "
             f"{api['success_phrase']}. API schema-valid {api['schema_phrase']}. "
-            "The T4 distill run and the round table are pending, not measured."
+            "The round table is pending, not measured. The T4 distill run is in the harness-v3 table."
         )
         third = (
             840,

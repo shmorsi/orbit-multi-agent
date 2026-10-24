@@ -8,7 +8,7 @@ The measured models are Qwen2.5-0.5B-Instruct and Qwen2.5-1.5B-Instruct, fine-tu
 
 The student is the three-role team: planner, worker, and critic. Training dialogues come from the bundled fictional makerspace corpus and from the generators described in `finetune/PROTOCOL.md`. The corpus is in `data/corpus/`. Dialogue counts and the training config are in `results/v2_qwen1.5b/RUN.json` and `finetune/configs/`. Hyperparameters were not changed in this polish pass.
 
-A distillation path asks a teacher (Claude by default, Gemini as an option) to produce trajectories on train and tune tasks only. That score is not in yet. The distill config sets `max_seq_length` to 1536. The trainer refuses a shorter cap, because truncation drops the assistant turn. The notebook is `notebooks/run_distill_and_score.ipynb`.
+A distillation path asks a teacher (Claude by default, Gemini as an option) to produce trajectories on train and tune tasks only. That score is `results/v3_qwen1.5b/team_distill.json`. The distill config sets `max_seq_length` to 1536. The trainer refuses a shorter cap, because truncation drops the assistant turn. The notebook is `notebooks/run_distill_and_score.ipynb`.
 
 ## Orbit Code and the boardroom
 
@@ -20,7 +20,7 @@ The boardroom is a scripted demo on fictional company files. The auditor refuses
 
 The three-role team and the six-role team have each been scored once as an API policy. The files are under `results/v3_api/`. The round table has not been scored. `make score-v3` is the command that would score it once, with `ANTHROPIC_API_KEY` or `ORBIT_ANTHROPIC_API_KEY`. Until `results/v3_api/<model>/team_v3.json` is a measured model eval, the README says the round-table team is not scored.
 
-Harness v3 is a change to search, python, and the critic's JSON shape. It is not the round-table team. Those Qwen scores are not in yet. They would land in `results/v3_qwen1.5b/`.
+Harness v3 is a change to search, python, and the critic's JSON shape. It is not the round-table team. The Qwen rescore is in `results/v3_qwen1.5b/`. This card does not restate those numbers. The README block does, and a task-success interval that includes zero is not a significant difference.
 
 ## Evaluation
 

@@ -37,9 +37,12 @@ RUNS = (
     ("team_distill", "Team distill"),
 )
 V3_PAIRS = (
+    ("team_base_minus_single_base", "team base minus single base"),
+    ("team_lora_minus_single_base", "team plus adapter minus single base"),
+    ("team_lora_minus_team_base", "team plus adapter minus team base"),
+    ("team_distill_minus_single_base", "team distill minus single base"),
     ("team_distill_minus_team_base", "team distill minus team base"),
     ("team_distill_minus_team_lora", "team distill minus team plus adapter"),
-    ("team_lora_minus_team_base", "team plus adapter minus team base"),
 )
 PENDING_API = (
     ("team_v1", "Claude policy, three-role team, harness v3", "results/v3_api/<model>/team_v1.json"),
@@ -91,6 +94,15 @@ def _zero(interval: dict) -> str:
     if interval["high"] < 0:
         return "That interval is below zero."
     return "That interval includes zero."
+
+
+def _significance(interval: dict) -> str:
+    """Say whether a paired interval excludes zero. An interval on zero is not a difference."""
+    if interval["low"] > 0:
+        return "That interval excludes zero and is above zero."
+    if interval["high"] < 0:
+        return "That interval excludes zero and is below zero."
+    return "That interval includes zero, so the difference is not significant."
 
 
 def _table_head() -> list[str]:
@@ -167,18 +179,22 @@ def _v1(root: Path) -> str:
 def _v3(root: Path) -> list[str]:
     folder = root / "results" / "v3_qwen1.5b"
     runs = {key: _read(folder / f"{key}.json") for key, _label in RUNS}
-    intro = (
+    shared = (
         "The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count "
         "printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return "
-        "one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`. single_base, team_base, "
-        "team_lora, and team_distill must be scored again on the frozen test under v3 before any comparison."
+        "one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`."
     )
     if not any(_measured(payload) for payload in runs.values()):
-        return [intro + " Those v3 scores are not in yet."]
+        return [
+            shared + " single_base, team_base, team_lora, and team_distill must be scored again on the frozen test "
+            "under v3 before any comparison. Those v3 scores are not in yet."
+        ]
     lines = [
-        intro,
+        shared + " single_base, team_base, team_lora, and team_distill were scored again on the frozen test under v3. "
+        "Compare those four runs with each other. Do not compare them with the archived v2 numbers.",
         "",
-        "Harness v3, frozen test `team-eval-v1`, each run scored once. Files: `results/v3_qwen1.5b/`.",
+        "Harness v3, frozen test `team-eval-v1`, each run scored once. Files: `results/v3_qwen1.5b/`. "
+        "This table is not a comparison with the archived v2 numbers.",
         "",
         *_table_head(),
     ]
@@ -201,8 +217,8 @@ def _v3(root: Path) -> list[str]:
         success = pair["task_success_rate"]
         schema = pair["schema_valid_rate"]
         sentences.append(
-            f"The paired bootstrap for task success, {label}, is {_interval(success)}. {_zero(success)} "
-            f"Its schema-valid interval is {_interval(schema)}."
+            f"The paired bootstrap for task success, {label}, is {_interval(success)}. {_significance(success)} "
+            f"Its schema-valid interval is {_interval(schema)}. {_significance(schema)}"
         )
     lines.append(" ".join(sentences))
     return lines
@@ -293,16 +309,27 @@ def _pending(root: Path) -> list[str]:
             slots.append((label, path))
     if not slots:
         return ["", "No pending model slot. Every configured score file is measured."]
-    if seen["team_v1"] or seen["team_v2"]:
+    waiting = []
+    if not seen["team_v1"] or not seen["team_v2"]:
+        waiting.append("score-v1 and score-v2 on Claude")
+    if not seen["team_v3"]:
+        waiting.append("the round table")
+    if not _measured(_read(folder / "team_distill.json")):
+        waiting.append("the QLoRA distill run on a T4")
+    if any(not _measured(_read(folder / f"{key}.json")) for key in ("single_base", "team_base", "team_lora")):
+        waiting.append("the v3 rescores of the archived runs")
+    if not waiting:
+        intro = "Pending slots. A row here is not a result."
+    elif len(waiting) == 1:
         intro = (
-            "Pending slots. A row here is not a result. The round table and the QLoRA distill run on a T4 stay here "
-            "until a measured file exists. The v3 rescores of the archived runs stay here for the same reason."
+            "Pending slots. A row here is not a result. "
+            f"{waiting[0][:1].upper()}{waiting[0][1:]} stays here until a measured file exists."
         )
     else:
+        listed = ", ".join(waiting[:-1]) + ", and " + waiting[-1]
         intro = (
-            "Pending slots. A row here is not a result. Score-v1 and score-v2 on Claude, the round table, and the "
-            "QLoRA distill run on a T4, stay here until a measured file exists. The v3 rescores of the archived runs "
-            "stay here for the same reason."
+            "Pending slots. A row here is not a result. "
+            f"{listed[:1].upper()}{listed[1:]} stay here until a measured file exists."
         )
     lines = [
         "",

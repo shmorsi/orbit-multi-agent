@@ -95,15 +95,18 @@ def test_results_block_matches_the_generator():
 
     readme = Path("README.md").read_text(encoding="utf-8")
     assert updated_readme() == readme, "run python -m orbit_agents.eval.readme"
-    assert "| Team distill | not scored | | | |" in render()
-    assert "pending" in render()
-    assert "code-eval-v2" in render()
-    assert "superseded" in render()
-    assert "| Single agent | pending | pending, not scored | | | | |" in render()
+    block = render()
+    assert "| Team distill | not scored | | | |" in block
+    assert "pending" in block
+    assert "code-eval-v2" in block
+    assert "superseded" in block
+    assert "| Single agent | pending | pending, not scored | | | | |" in block
+    assert "not significant" in block
+    lora = json.loads(Path("results/v3_qwen1.5b/team_lora.json").read_text(encoding="utf-8"))
+    assert f"| Team plus adapter | {lora['n_success']} of {lora['n_tasks']} |" in block
     readme_body = Path("README.md").read_text(encoding="utf-8")
     for banned in ("4 of 16", "12 of 16", "16 of 16"):
         assert banned not in readme_body
-    assert "QLoRA on a T4" in render()
     assert "task-success gain" not in render()
     assert "task-success gain" not in readme.lower()
     assert "mcp" not in readme.lower()
