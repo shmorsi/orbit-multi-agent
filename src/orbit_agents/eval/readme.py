@@ -1,10 +1,13 @@
-"""Write the README results block from the committed results files.
+"""Write the two generated README blocks from the committed results files.
 
-The block sits between the RESULTS_START and RESULTS_END markers. The v1 and v2
-runs are archived and render the same text every time. Harness v3 rows appear
-only for files under results/v3_qwen1.5b/ that are measured model evals; a
-missing or pending file renders as "not scored". Paired intervals appear only
-when that directory's comparison.json is measured.
+RESULTS_START/RESULTS_END holds Orbit Code on code-eval-v2. FINETUNE_START/FINETUNE_END
+holds the harness-v3 Qwen table, the API-policy teams, the archived v1 and v2 runs,
+and the pending slots. Paired bootstrap intervals render as compact tables, one row
+per pair, each cell saying whether the interval includes zero.
+
+Harness v3 rows appear only for files under results/v3_qwen1.5b/ that are measured
+model evals; a missing or pending file renders as "not scored". Paired intervals
+appear only when that directory's comparison.json is measured.
 
 API-policy rows (results/v3_api/<model>/team_v1.json, team_v2.json, and
 team_v3.json, written once each by `python -m orbit_agents.eval.score_team`)
@@ -91,12 +94,13 @@ def _interval(interval: dict) -> str:
     )
 
 
-def _zero(interval: dict) -> str:
+def _zero_word(interval: dict) -> str:
+    """Where a paired interval sits relative to zero. An interval on zero is not a difference."""
     if interval["low"] > 0:
-        return "That interval is above zero."
+        return "above zero"
     if interval["high"] < 0:
-        return "That interval is below zero."
-    return "That interval includes zero."
+        return "below zero"
+    return "includes zero"
 
 
 def _significance(interval: dict) -> str:
@@ -115,6 +119,36 @@ def _table_head() -> list[str]:
     ]
 
 
+def _pair_cell(interval: dict) -> str:
+    return f"{_interval(interval)}, {_zero_word(interval)}"
+
+
+def _pair_table(rows: list[tuple[str, dict]]) -> list[str]:
+    """One row per paired difference: task success and schema-valid rate, each with its interval."""
+    lines = [
+        "| Paired difference | Task success | Schema-valid rate |",
+        "| --- | --- | --- |",
+    ]
+    for label, pair in rows:
+        lines.append(f"| {label} | {_pair_cell(pair['task_success_rate'])} | {_pair_cell(pair['schema_valid_rate'])} |")
+    return lines
+
+
+def _method(root: Path) -> str:
+    """How the intervals were computed, read from the first measured comparison file."""
+    for folder in ("v3_qwen1.5b", "v2_qwen1.5b"):
+        comparison = _read(root / "results" / folder / "comparison.json")
+        if not comparison or comparison.get("status") != "measured":
+            continue
+        for pair in comparison["pairs"].values():
+            interval = pair["task_success_rate"]
+            return (
+                f"Intervals are a paired percentile bootstrap (alpha {interval['alpha']:g}, "
+                f"{display_number(interval['n_resamples'])} resamples). "
+            )
+    return ""
+
+
 def _v2(root: Path, distill_v3: bool) -> list[str]:
     folder = root / "results" / "v2_qwen1.5b"
     run = _read(folder / "RUN.json")
@@ -122,44 +156,37 @@ def _v2(root: Path, distill_v3: bool) -> list[str]:
     comparison = _read(folder / "comparison.json")
     runs = {key: _read(folder / f"{key}.json") for key, _label in RUNS[:3]}
     pair = comparison["pairs"]["team_lora_minus_team_base"]
-    success = pair["task_success_rate"]
-    schema = pair["schema_valid_rate"]
     lines = [
-        f"Measured once on the frozen test `team-eval-v1`, Qwen2.5-1.5B-Instruct, QLoRA, {run['n_train_dialogs']} "
-        f"train dialogues and {run['n_tune_dialogs']} tune dialogues. Files: `results/v2_qwen1.5b/`. Logged loss went "
-        f"from {display_number(loss['first_logged_loss'])} at step {loss['first_logged_step']} to "
-        f"{display_number(loss['last_logged_loss'])} at step {loss['last_logged_step']}. Task success did not clear zero.",
+        "#### Archived: harness v2",
+        "",
+        f"Qwen2.5-1.5B-Instruct, QLoRA, {run['n_train_dialogs']} train and {run['n_tune_dialogs']} tune dialogues. "
+        f"Logged loss went from {display_number(loss['first_logged_loss'])} at step {loss['first_logged_step']} to "
+        f"{display_number(loss['last_logged_loss'])} at step {loss['last_logged_step']}. Files: `results/v2_qwen1.5b/`. "
+        "Harness v3 changed the tools and the gate, so this table is a record, not a baseline for the tables above.",
         "",
         *_table_head(),
     ]
     for key, label in RUNS[:3]:
         lines.append(_row(label, runs[key]))
     lines.append("| Team distill | not scored | | | |")
-    lines.extend(
-        [
-            "",
-            "The adapter's two answerable successes sit next to a missed trap: correct refusals went from "
-            f"{runs['team_base']['n_correct_refusals']} to {runs['team_lora']['n_correct_refusals']}. The paired "
-            f"bootstrap for task success, adapter minus team base, is {_interval(success)}. {_zero(success)} "
-            f"The adapter is not separated from the base team on task success. The same pair's schema-valid interval "
-            f"is {_interval(schema)}. {_zero(schema)} Schema-valid rate moved. Task success did not, on this "
-            f"{runs['team_base']['n_tasks']}-task set.",
-            "",
-            "![Logged training loss for the measured Qwen2.5-1.5B QLoRA run. The curve is the committed file.]"
-            "(results/v2_qwen1.5b/loss_curve.png)",
-            "",
-        ]
-    )
-    lines.append(_v1(root))
-    lines.append("")
+    lines.extend(["", *_pair_table([("Team plus adapter minus team base", pair)]), ""])
     tail = (
-        "Team distill is a fourth config, scored only under harness v3 below."
+        "Team distill was not scored under v2. Its only score is in the harness v3 table."
         if distill_v3
         else "Team distill is a fourth config. It has not been scored."
     )
     lines.append(
-        "The placeholder files at the top of `results/` stay pending. A harness file in `results/` is a system check "
-        "of the scripted tools, not a model score. " + tail
+        "Fine-tuning moved the schema-valid rate, not task success, and the adapter missed a trap: correct refusals "
+        f"went from {runs['team_base']['n_correct_refusals']} to {runs['team_lora']['n_correct_refusals']}. " + tail
+    )
+    lines.extend(
+        [
+            "",
+            "![Logged training loss for the measured Qwen2.5-1.5B QLoRA run. The curve is the committed file.]"
+            "(results/v2_qwen1.5b/loss_curve.png)",
+            "",
+            _v1(root),
+        ]
     )
     return lines
 
@@ -168,36 +195,35 @@ def _v1(root: Path) -> str:
     folder = root / "results" / "v1_qwen0.5b"
     runs = [_read(folder / f"{key}.json") for key, _label in RUNS[:3]]
     loss = _read(folder / "loss_summary.json")
-    successes = ", ".join(f"{run['n_success']} of {run['n_tasks']}" for run in runs[:2])
-    schema = ", ".join(display_number(run["schema_valid_rate"]) for run in runs[:2])
+    successes = ", ".join(f"{run['n_success']} of {run['n_tasks']}" for run in runs)
+    schema = ", ".join(display_number(run["schema_valid_rate"]) for run in runs)
     return (
-        f"The earlier 0.5B run is in `results/v1_qwen0.5b/`. Successes were {successes}, then "
-        f"{runs[2]['n_success']} of {runs[2]['n_tasks']}, with schema-valid rates {schema}, and "
-        f"{display_number(runs[2]['schema_valid_rate'])}. Logged loss went from "
+        f"The earlier 0.5B run (`results/v1_qwen0.5b/`): single base, team base, and team plus adapter scored "
+        f"{successes}, with schema-valid rates {schema}. Logged loss went from "
         f"{display_number(loss['first_logged_loss'])} to {display_number(loss['last_logged_loss'])}. "
-        "Its task-success interval also failed to clear zero. Fine-tuning taught the format."
+        "Its task-success interval also includes zero."
     )
 
 
 def _v3(root: Path) -> list[str]:
     folder = root / "results" / "v3_qwen1.5b"
     runs = {key: _read(folder / f"{key}.json") for key, _label in RUNS}
-    shared = (
-        "The harness changed in v3. Search now lists tables and logs, python can read a bundled file by path, a count "
-        "printed by python or equal to the matching lines in the cited text stays grounded, and the critic must return "
-        "one JSON object. The v2 numbers above stay archived in `results/v2_qwen1.5b/`."
+    harness = (
+        "Harness v3 changed the tools and the gate: search lists tables and logs, python can read a bundled file by "
+        "path, a count printed by python or equal to the matching lines in the cited text stays grounded, and the "
+        "critic must return one JSON object."
     )
     if not any(_measured(payload) for payload in runs.values()):
         return [
-            shared + " single_base, team_base, team_lora, and team_distill must be scored again on the frozen test "
-            "under v3 before any comparison. Those v3 scores are not in yet."
+            "#### Qwen2.5-1.5B, harness v3",
+            "",
+            harness + " single_base, team_base, team_lora, and team_distill must be scored again on the frozen test "
+            "under v3 before any comparison. Those v3 scores are not in yet.",
         ]
     lines = [
-        shared + " single_base, team_base, team_lora, and team_distill were scored again on the frozen test under v3. "
-        "Compare those four runs with each other. Do not compare them with the archived v2 numbers.",
+        "#### Qwen2.5-1.5B, harness v3 (current)",
         "",
-        "Harness v3, frozen test `team-eval-v1`, each run scored once. Files: `results/v3_qwen1.5b/`. "
-        "This table is not a comparison with the archived v2 numbers.",
+        harness + " The four configs were scored again under v3, once each. Files: `results/v3_qwen1.5b/`.",
         "",
         *_table_head(),
     ]
@@ -212,18 +238,20 @@ def _v3(root: Path) -> list[str]:
             "It is not in yet, so no v3 difference is claimed."
         )
         return lines
-    sentences = []
-    for key, label in V3_PAIRS:
-        pair = comparison["pairs"].get(key)
-        if pair is None:
-            continue
-        success = pair["task_success_rate"]
-        schema = pair["schema_valid_rate"]
-        sentences.append(
-            f"The paired bootstrap for task success, {label}, is {_interval(success)}. {_significance(success)} "
-            f"Its schema-valid interval is {_interval(schema)}. {_significance(schema)}"
-        )
-    lines.append(" ".join(sentences))
+    rows = [
+        (label[:1].upper() + label[1:], comparison["pairs"][key])
+        for key, label in V3_PAIRS
+        if key in comparison["pairs"]
+    ]
+    lines.extend(_pair_table(rows))
+    lines.extend(
+        [
+            "",
+            "No task-success interval excludes zero."
+            if all(_zero_word(pair["task_success_rate"]) == "includes zero" for _label, pair in rows)
+            else "At least one task-success interval excludes zero.",
+        ]
+    )
     return lines
 
 
@@ -257,9 +285,11 @@ def _api(root: Path) -> list[str]:
         lines.extend(
             [
                 "",
+                f"#### API policy `{model}`, three roles against six",
+                "",
                 (
-                    f"API policy `{model}`, harness v3, frozen test `team-eval-v1`, each team scored once with the same "
-                    f"model and role prompts only. Files: `results/v3_api/{model_dir.name}/`."
+                    "Harness v3, same frozen test, same model and role prompts for every team, each team scored once. "
+                    f"Files: `results/v3_api/{model_dir.name}/`."
                 ),
                 "",
                 *_table_head(),
@@ -278,12 +308,7 @@ def _api(root: Path) -> list[str]:
                 "The paired comparison needs both teams measured on this model. It is not in yet, so no difference is claimed."
             )
         else:
-            success = pair["task_success_rate"]
-            schema = pair["schema_valid_rate"]
-            lines.append(
-                f"The paired bootstrap for task success, v2 team minus v1 team, is {_interval(success)}. "
-                f"{_zero(success)} Its schema-valid interval is {_interval(schema)}. {_zero(schema)}"
-            )
+            lines.extend(_pair_table([("v2 team minus v1 team", pair)]))
     return lines
 
 
@@ -312,31 +337,9 @@ def _pending(root: Path) -> list[str]:
             slots.append((label, path))
     if not slots:
         return ["", "No pending model slot. Every configured score file is measured."]
-    waiting = []
-    if not seen["team_v1"] or not seen["team_v2"]:
-        waiting.append("score-v1 and score-v2 on Claude")
-    if not seen["team_v3"]:
-        waiting.append("the round table")
-    if not _measured(_read(folder / "team_distill.json")):
-        waiting.append("the QLoRA distill run on a T4")
-    if any(not _measured(_read(folder / f"{key}.json")) for key in ("single_base", "team_base", "team_lora")):
-        waiting.append("the v3 rescores of the archived runs")
-    if not waiting:
-        intro = "Pending slots. A row here is not a result."
-    elif len(waiting) == 1:
-        intro = (
-            "Pending slots. A row here is not a result. "
-            f"{waiting[0][:1].upper()}{waiting[0][1:]} stays here until a measured file exists."
-        )
-    else:
-        listed = ", ".join(waiting[:-1]) + ", and " + waiting[-1]
-        intro = (
-            "Pending slots. A row here is not a result. "
-            f"{listed[:1].upper()}{listed[1:]} stay here until a measured file exists."
-        )
     lines = [
         "",
-        intro,
+        "Pending slots. A row here has no number until its measured file exists.",
         "",
         "| Slot | File | Status |",
         "| --- | --- | --- |",
@@ -351,11 +354,9 @@ CODE_CONFIGS = (
 )
 
 _V1_SUPERSEDED = (
-    "The earlier split `code-eval-v1` was scored and is superseded. "
-    "The team pipeline refused a task when the planner reply failed the schema, "
-    "and a critic accept stopped a red build before the coder could revise. "
-    "Those files stay at `results/code/claude-haiku-5-5/` as the record of that run. "
-    "They are not the current score."
+    "The earlier split `code-eval-v1` is superseded: its team pipeline refused a task when the planner reply failed "
+    "the schema, and a critic accept could end a red build before the coder revised. That record stays in "
+    "`results/code/claude-haiku-5-5/`. It is not the current score."
 )
 
 
@@ -382,8 +383,8 @@ def _code(root: Path) -> list[str]:
     does not copy their pass rates.
     """
     lines = [
-        "Orbit Code, frozen split `code-eval-v2`. A row is filled only from a measured file under `results/code_v2/`. "
-        "Anything else is pending, not scored.",
+        "Orbit Code on the frozen split `code-eval-v2`: each config scored once, graded by hidden tests the agents "
+        "never see. A row is filled only from a measured file under `results/code_v2/`; anything else is pending.",
         "",
         "| Config | Model | pass@1 | Tests-passed rate | Reviewer rejections | Tokens | Cost USD |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -465,20 +466,22 @@ def render_results(root: Path = ROOT) -> str:
 
 
 def render_finetune(root: Path = ROOT) -> str:
-    """Archived makerspace runs, then the harness-v3 Qwen table."""
+    """Harness-v3 Qwen table, the API teams, then the archived harness-v2 runs and the pending slots."""
     distill = _measured(_read(root / "results" / "v3_qwen1.5b" / "team_distill.json"))
+    base = _read(root / "results" / "v2_qwen1.5b" / "team_base.json")
     lines = [
         FINE_START,
         (
-            "Rates, losses, and intervals below are the committed values, shown to three decimal places. "
-            "The JSON files hold the full values."
+            "Committed values from `results/`, shown to three decimal places; the JSON files keep full precision. "
+            f"Every config was scored once on the frozen test `team-eval-v1`: {base['n_tasks']} tasks, "
+            f"{base['n_traps']} of them traps. {_method(root)}An interval that includes zero is not a difference."
         ),
         "",
-        *_v2(root, distill),
-        "",
         *_v3(root),
-        *_round_table(root),
         *_api(root),
+        "",
+        *_v2(root, distill),
+        *_round_table(root),
         *_pending(root),
         FINE_END,
     ]

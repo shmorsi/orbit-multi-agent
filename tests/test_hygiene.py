@@ -30,7 +30,6 @@ def test_readme_is_a_landing_page():
     ):
         assert heading in README
     assert "```mermaid" in README.split("## Why this matters", 1)[0]
-    assert "aria-label=" in README
     assert "coming soon" not in README.lower()
     assert "TODO" not in README
     images = IMG_RE.findall(README)
@@ -40,7 +39,8 @@ def test_readme_is_a_landing_page():
         if src.startswith(("http://", "https://")):
             continue
         assert Path(src).is_file(), src
-    assert 'src="docs/mission-control.mp4"' in README
+    assert "(docs/mission-control.mp4)" in README
+    assert "https://shmorsi.github.io/" in README
 
 
 def test_dev_guide_names_locked_paths_and_the_generator():

@@ -1,12 +1,17 @@
 [project]
 name = "orbit-agents"
 version = "0.1.0"
-description = "Orbit: Multi-Agent Mission Control. A local planner, worker, and critic over a bundled makerspace corpus, with a frozen eval and an optional LoRA track."
+description = "Orbit: a multi-agent team where every turn is a schema-checked JSON object, the reviewer is code, and a patch ships only when the tests pass. Frozen evals, JSONL traces, and a QLoRA track."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Sherif Morsi", email = "shmorsi@outlook.com" }]
 dependencies = ["jsonschema>=4.21"]
+
+[project.urls]
+Homepage = "https://shmorsi.github.io/orbit/"
+Repository = "https://github.com/shmorsi/orbit-multi-agent"
+Author = "https://shmorsi.github.io/"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff==0.17.2", "playwright==1.64.1", "fonttools==4.67.0", "brotli==1.2.1"]
