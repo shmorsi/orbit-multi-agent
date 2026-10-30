@@ -353,7 +353,7 @@ def record(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Record the Mission Control replay")
     parser.add_argument("--trace", default="revise.jsonl")
-    parser.add_argument("--artifacts", type=Path, default=Path("/opt/cursor/artifacts/mission-control.mp4"))
+    parser.add_argument("--artifacts", type=Path, default=None, help="Optional extra copy of the mp4")
     parser.add_argument("--mp4", default="mission-control.mp4")
     parser.add_argument("--gif", default="mission-control.gif")
     parser.add_argument("--step-ms", type=int, default=2200)

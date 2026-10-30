@@ -32,7 +32,7 @@ Regenerate replay traces with `make traces`, `make traces-v2`, `make traces-v3`,
 
 `python -m orbit_agents.eval.build_tasks` rewrites the frozen split and the manifest. Do not run it to refresh the checkout.
 
-`python -m orbit_agents.eval.readme` rewrites the Key results block in `README.md` from `results/`. `python -m orbit_agents.eval.readme --check` fails when that block is stale. The test suite runs the check.
+`python -m orbit_agents.eval.readme` rewrites both generated blocks in `README.md` (between `RESULTS_START`/`RESULTS_END` and `FINETUNE_START`/`FINETUNE_END`) from `results/`. Edit `src/orbit_agents/eval/readme.py`, not the text between the markers. `python -m orbit_agents.eval.readme --check` fails when a block is stale. The test suite runs the check.
 
 ## Scores that need a key or a GPU
 

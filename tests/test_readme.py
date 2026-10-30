@@ -152,7 +152,7 @@ def test_generator_adds_measured_v3_rows_only(tmp_path):
     assert "| Team distill | 2 of 12 |" in block
     assert "| Team base | not scored | | | |" in block
     assert "no v3 difference is claimed" in block
-    assert "scored only under harness v3 below" in block
+    assert "Its only score is in the harness v3 table." in block
 
 
 def test_readme_figures_match_the_measured_files():

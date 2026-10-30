@@ -3,9 +3,17 @@ message: If you use Orbit, cite it as below.
 type: software
 title: Orbit
 abstract: >-
-  A local language-agent team that calls tools under a schema and refuses
-  any claim those tools cannot prove. The frozen evaluation and the measured
-  fine-tune are in the repository.
+  A multi-agent coding team (planner, coder, test runner, critic, and a
+  reviewer written as code) where every turn is one JSON object validated
+  against its role's schema and a patch ships only when the tests pass. The
+  frozen evaluations, the measured scores, and a QLoRA fine-tune of the team
+  protocol are in the repository.
+keywords:
+  - multi-agent systems
+  - LLM agents
+  - tool use
+  - evaluation
+  - QLoRA
 authors:
   - family-names: Morsi
     given-names: Sherif
